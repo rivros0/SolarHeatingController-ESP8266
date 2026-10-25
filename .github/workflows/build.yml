@@ -1,0 +1,29 @@
+name: Build and control tests
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh scripts/test.sh
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        board: [nodemcuv2, d1_mini]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install platformio==6.2.0
+      - run: pio run -e ${{ matrix.board }}
+      - run: pio run -e ${{ matrix.board }} -t buildfs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: solar-heating-${{ matrix.board }}
+          path: |
+            .pio/build/${{ matrix.board }}/firmware.bin
+            .pio/build/${{ matrix.board }}/littlefs.bin

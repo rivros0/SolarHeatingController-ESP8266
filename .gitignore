@@ -1,0 +1,8 @@
+.pio/
+.vscode/
+config*.json
+*.bin
+__pycache__/
+dist/
+.venv/
+*.csv
