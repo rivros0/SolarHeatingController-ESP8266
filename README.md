@@ -67,6 +67,7 @@ Valori iniziali: 19/21 °C, riserva 500 W, carico clima 1200 W, stabilità 10 mi
 - [Aggiornamento OTA e recupero USB](docs/OTA.md)
 - [Architettura e limiti](docs/ARCHITECTURE.md)
 - [Requisiti e corrispondenza implementazione](docs/REQUIREMENTS.md)
+- [Valutazione estensione raffrescamento HEAT/COOL](docs/COOLING_DESIGN.md) (proposta, non attiva in 0.1.0)
 - [Esito verifiche software](docs/VALIDATION.md)
 
 ```sh
