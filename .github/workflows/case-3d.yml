@@ -1,0 +1,80 @@
+name: Contenitore 3D - STEP e STL
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'hardware/3d-case/**'
+      - '.github/workflows/case-3d.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  genera-case:
+    runs-on: ubuntu-latest
+    steps:
+      # Build riproducibile con libreria CadQuery e sorgente parametrico.
+      - name: Scarica repository
+        uses: actions/checkout@v4
+
+      - name: Configura Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installa CadQuery
+        run: python -m pip install --upgrade pip && python -m pip install "cadquery==2.6.1"
+
+      - name: Genera STEP e STL
+        run: python hardware/3d-case/create_case.py
+
+      - name: Verifica file generati
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in SolarHeatingCase_BASE.step SolarHeatingCase_LID.step SolarHeatingCase_ASSEMBLY.step SolarHeatingCase_BASE.stl SolarHeatingCase_LID.stl; do
+            test -s "hardware/3d-case/$name"
+          done
+
+      - name: Crea archivio scaricabile
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd hardware/3d-case
+          zip -9 SolarHeatingCase_ESP8266_SolidWorks.zip \
+            SolarHeatingCase_BASE.step \
+            SolarHeatingCase_LID.step \
+            SolarHeatingCase_ASSEMBLY.step \
+            SolarHeatingCase_BASE.stl \
+            SolarHeatingCase_LID.stl \
+            create_case.py \
+            converti_STEP_in_SLDPRT.vbs \
+            README.md
+          unzip -t SolarHeatingCase_ESP8266_SolidWorks.zip
+
+      - name: Pubblica ZIP fra gli artifact di Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolarHeatingCase_ESP8266_SolidWorks
+          path: hardware/3d-case/SolarHeatingCase_ESP8266_SolidWorks.zip
+          if-no-files-found: error
+
+      # Asset di Release visibile e scaricabile senza usare Artifacts.
+      - name: Pubblica ZIP nella Release GitHub
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="case-v0.1"
+          ARCHIVE="hardware/3d-case/SolarHeatingCase_ESP8266_SolidWorks.zip"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$ARCHIVE" --clobber
+          else
+            gh release create "$TAG" "$ARCHIVE" \
+              --title "SolarHeatingCase ESP8266 v0.1" \
+              --notes "Contenitore 3D preliminare per ESP8266, sensore SHT31 e trasmettitore IR. Inclusi STEP, STL, sorgente CadQuery e conversione SLDPRT."
+          fi
