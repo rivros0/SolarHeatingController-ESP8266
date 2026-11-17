@@ -43,16 +43,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p dist/firmware
           pio run -e nodemcuv2
+          test -s .pio/build/nodemcuv2/firmware.bin
+          cp .pio/build/nodemcuv2/firmware.bin dist/firmware/firmware-nodemcuv2.bin
           pio run -e d1_mini
+          test -s .pio/build/d1_mini/firmware.bin
+          cp .pio/build/d1_mini/firmware.bin dist/firmware/firmware-d1_mini.bin
 
       - name: Copia e prepara manifest con SHA256
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist/firmware firmware
-          cp .pio/build/nodemcuv2/firmware.bin dist/firmware/firmware-nodemcuv2.bin
-          cp .pio/build/d1_mini/firmware.bin dist/firmware/firmware-d1_mini.bin
+          mkdir -p firmware
+          test -s dist/firmware/firmware-nodemcuv2.bin
+          test -s dist/firmware/firmware-d1_mini.bin
           python - <<'PY'
           import hashlib
           import json
