@@ -20,3 +20,12 @@
 
 #define SOLAR_ADMIN_USERNAME        "admin"
 #define SOLAR_ADMIN_PASSWORD        "INSERISCI_PASSWORD_ADMIN_ALMENO_12_CARATTERI"
+
+/// ===========================================================================
+/// IP STATICO (facoltativo; lasciare vuota SOLAR_STATIC_IP per usare DHCP)
+/// ===========================================================================
+#define SOLAR_STATIC_IP             ""
+#define SOLAR_STATIC_GATEWAY        ""
+#define SOLAR_STATIC_SUBNET         "255.255.255.0"
+#define SOLAR_STATIC_DNS1           ""
+#define SOLAR_STATIC_DNS2           ""
