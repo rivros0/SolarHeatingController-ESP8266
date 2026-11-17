@@ -1,0 +1,120 @@
+name: Release firmware ESP8266 (stable)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'data/**'
+      - 'platformio.ini'
+      - 'scripts/prepare_tls_certs.py'
+      - '.github/workflows/firmware-release.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: firmware-stable
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Dipendenze
+        run: python -m pip install platformio==6.2.0
+
+      - name: Test delle logiche
+        run: sh scripts/test.sh
+
+      - name: Compila e verifica firmware di entrambe le schede
+        shell: bash
+        run: |
+          set -euo pipefail
+          pio run -e nodemcuv2
+          pio run -e d1_mini
+          pio run -e nodemcuv2 -t buildfs
+          pio run -e d1_mini -t buildfs
+
+      - name: Copia e prepara manifest con SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/firmware firmware
+          cp .pio/build/nodemcuv2/firmware.bin dist/firmware/firmware-nodemcuv2.bin
+          cp .pio/build/d1_mini/firmware.bin dist/firmware/firmware-d1_mini.bin
+          python - <<'PY'
+          import hashlib
+          import json
+          import re
+          from pathlib import Path
+
+          main = Path("src/main.cpp").read_text(encoding="utf-8")
+          match = re.search(r'VERSION\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"', main)
+          if match is None:
+              raise SystemExit("VERSION non valida o assente")
+          release = {"version": match.group(1), "layout": "4m1m", "boards": {}}
+          for board in ("nodemcuv2", "d1_mini"):
+              path = Path("dist/firmware") / ("firmware-" + board + ".bin")
+              payload = path.read_bytes()
+              release["boards"][board] = {
+                  "size": len(payload),
+                  "sha256": hashlib.sha256(payload).hexdigest(),
+              }
+          Path("firmware/stable.json").write_text(
+              json.dumps(release, indent=2) + "\n", encoding="utf-8"
+          )
+          print(json.dumps(release, indent=2))
+          PY
+
+      - name: Archivia release e metadati
+        uses: actions/upload-artifact@v4
+        with:
+          name: solar-firmware-stable
+          path: |
+            dist/firmware/*.bin
+            firmware/stable.json
+          if-no-files-found: error
+
+      - name: Pubblica soltanto firmware nella release firmware-stable
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="firmware-stable"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/firmware/firmware-nodemcuv2.bin dist/firmware/firmware-d1_mini.bin --clobber
+          else
+            gh release create "$TAG" dist/firmware/firmware-nodemcuv2.bin dist/firmware/firmware-d1_mini.bin \
+              --target "$GITHUB_SHA" \
+              --title "SolarHeating Controller - Firmware stabile" \
+              --notes "Firmware per NodeMCU e D1 Mini. I file .bin sono aggiornabili dall'interfaccia web dell'ESP8266. Il contenitore CAD usa una release separata."
+          fi
+
+      - name: Aggiorna indice HTTPS con checksum dopo la pubblicazione degli asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --ff-only origin main
+          git add firmware/stable.json
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica al manifest"
+          else
+            git commit -m "firmware: pubblica indice stable con checksum verificati [skip ci]"
+            git push origin HEAD:main
+          fi
