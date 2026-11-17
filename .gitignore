@@ -6,3 +6,9 @@ __pycache__/
 dist/
 .venv/
 *.csv
+
+# Credenziali locali: non pubblicare su GitHub
+include/private_settings.h
+**/secrets.h
+.env
+.env.*
