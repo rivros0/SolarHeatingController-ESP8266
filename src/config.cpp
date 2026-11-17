@@ -1,4 +1,10 @@
 #include "config.h"
+
+// Credenziali locali opzionali: NON vengono incluse nella repository pubblica.
+#if __has_include("private_settings.h")
+#include "private_settings.h"
+#define SOLAR_HAS_PRIVATE_SETTINGS 1
+#endif
 Config cfg;
 bool storageReady=false,configReady=false;
 static void encode(JsonObject o,const Config& c,bool secrets) {
@@ -102,6 +108,42 @@ void loadConfig() {
   if(exists) { Serial.println(F("Configurazione corrotta/futura: recuperare via USB. Nessuna sovrascrittura.")); return; }
   char password[25]; snprintf(password,sizeof(password),"%08lx%08lx%08lx",os_random(),os_random(),os_random());
   cfg.adminPassword=password;
+
+  // Le credenziali compile-time sono soltanto valori iniziali.
+  // Se LittleFS contiene gia' config.json/config.bak, questo ramo non e'
+  // eseguito, quindi gli aggiornamenti firmware NON sovrascrivono il Wi-Fi.
+  bool usesPrivateSettings=false;
+#ifdef SOLAR_HAS_PRIVATE_SETTINGS
+  String initialSsid=SOLAR_WIFI_SSID;
+  String initialWifiPassword=SOLAR_WIFI_PASSWORD;
+  String initialAdmin=SOLAR_ADMIN_USERNAME;
+  String initialAdminPassword=SOLAR_ADMIN_PASSWORD;
+
+  bool wifiValid=initialSsid.length()<=32 && initialWifiPassword.length()<=63;
+  if(initialSsid.length()>0 && initialWifiPassword.length()>0) {
+    wifiValid=wifiValid && initialWifiPassword.length()>=8;
+  }
+  bool adminValid=initialAdmin.length()>0 && initialAdmin.length()<=32 &&
+    initialAdminPassword.length()>=12 && initialAdminPassword.length()<=63;
+
+  if(!wifiValid || !adminValid) {
+    Serial.println(F("Credenziali nel file privato non valide. Nessun salvataggio."));
+    return;
+  }
+  cfg.ssid=initialSsid;
+  cfg.wifiPassword=initialWifiPassword;
+  cfg.adminUser=initialAdmin;
+  cfg.adminPassword=initialAdminPassword;
+  usesPrivateSettings=true;
+#endif
+
   configReady=saveConfig(cfg);
-  if(configReady) { Serial.println(F("PRIMO AVVIO - utente admin, password web/AP:")); Serial.println(cfg.adminPassword); }
+  if(configReady) {
+    if(usesPrivateSettings) {
+      Serial.println(F("PRIMO AVVIO - Wi-Fi e credenziali iniziali lette dal file privato."));
+    } else {
+      Serial.println(F("PRIMO AVVIO - utente admin, password web/AP:"));
+      Serial.println(cfg.adminPassword);
+    }
+  }
 }
