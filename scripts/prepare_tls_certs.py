@@ -13,7 +13,6 @@ ROOTS = (
     "ISRG_Root_X1",
     "Sectigo_Public_Server_Authentication_Root_E46",
     "Sectigo_Public_Server_Authentication_Root_R46",
-    "DigiCert_Global_Root_CA",
 )
 
 def prepare_ca_header():
