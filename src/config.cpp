@@ -170,24 +170,32 @@ void loadConfig() {
   bool adminValid=initialAdmin.length()>0 && initialAdmin.length()<=32 &&
     initialAdminPassword.length()>=12 && initialAdminPassword.length()<=63;
 
-  if(!wifiValid || !adminValid) {
-    Serial.println(F("Credenziali nel file privato non valide. Nessun salvataggio."));
-    return;
+  // Il file .example contiene segnaposto volutamente non utilizzabili.
+  bool placeholders=initialSsid=="INSERISCI_NOME_RETE_WIFI" ||
+    initialWifiPassword=="INSERISCI_PASSWORD_WIFI" ||
+    initialAdminPassword=="INSERISCI_PASSWORD_ADMIN_ALMENO_12_CARATTERI";
+
+  if(!wifiValid || !adminValid || placeholders) {
+    Serial.println(F("File privato incompleto: uso AP di configurazione con password casuale."));
+  } else {
+    Config candidate=cfg;
+    candidate.ssid=initialSsid;
+    candidate.wifiPassword=initialWifiPassword;
+    candidate.staticIp=SOLAR_STATIC_IP;
+    candidate.staticGateway=SOLAR_STATIC_GATEWAY;
+    candidate.staticSubnet=SOLAR_STATIC_SUBNET;
+    candidate.staticDns1=SOLAR_STATIC_DNS1;
+    candidate.staticDns2=SOLAR_STATIC_DNS2;
+    candidate.adminUser=initialAdmin;
+    candidate.adminPassword=initialAdminPassword;
+
+    if(!validStaticNetwork(candidate)) {
+      Serial.println(F("IPv4 statico incompleto: uso AP con credenziali casuali."));
+    } else {
+      cfg=candidate;
+      usesPrivateSettings=true;
+    }
   }
-  cfg.ssid=initialSsid;
-  cfg.wifiPassword=initialWifiPassword;
-  cfg.staticIp=SOLAR_STATIC_IP;
-  cfg.staticGateway=SOLAR_STATIC_GATEWAY;
-  cfg.staticSubnet=SOLAR_STATIC_SUBNET;
-  cfg.staticDns1=SOLAR_STATIC_DNS1;
-  cfg.staticDns2=SOLAR_STATIC_DNS2;
-  cfg.adminUser=initialAdmin;
-  cfg.adminPassword=initialAdminPassword;
-  if(!validStaticNetwork(cfg)) {
-    Serial.println(F("Parametri IPv4 statici non validi nel file privato."));
-    return;
-  }
-  usesPrivateSettings=true;
 #endif
 
   configReady=saveConfig(cfg);
