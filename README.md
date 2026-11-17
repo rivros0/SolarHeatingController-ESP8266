@@ -2,7 +2,7 @@
 
 Controller locale per usare il surplus fotovoltaico nel riscaldamento di un climatizzatore Hisense, mantenendo priorità ai carichi domestici e alla ricarica batterie. Firmware Arduino per **NodeMCU ESP8266 e Wemos D1 Mini da 4 MB**, dashboard HTML/CSS/JS su LittleFS, SolarAssistant via MQTT, SHT31 e IRremoteESP8266. Nessun servizio cloud necessario.
 
-**Versione 0.1.0 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il modello del climatizzatore e la tensione nominale del banco AGM non sono ancora noti: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
+**Versione 0.2.0 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
 
 ## Funzioni
 
@@ -15,11 +15,13 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 - Stato comandato separato da stima, confidenza e stato sconosciuto; apprendimento guidato e riconoscimento variazioni di carico con riferimento e attesa compressore.
 - Dashboard responsive, grafici senza dipendenze esterne, diagnostica, esportazione configurazione senza credenziali, 60 campioni e 16 eventi in RAM.
 - OTA firmware `.bin` autenticato su `/update`, controllo errori, riavvio differito e conservazione LittleFS.
+- Aggiornamento da GitHub (release firmware-stable) con controllo versione, board, HTTPS verificato e SHA256 prima di installare.
+- Credenziali iniziali Wi-Fi/admin in file locale escluso da Git e configurazione IPv4 statico (gateway, subnet, DNS).
 - Configurazione versionata, migrazione v1→v2, backup e sostituzione tramite file temporaneo. Nessuna formattazione automatica.
 
 ## Avvio rapido
 
-1. Cabla i componenti secondo [HARDWARE.md](docs/HARDWARE.md). Verifica il modulo IR prima di alimentarlo.
+1. Cabla i componenti secondo [HARDWARE.md](docs/HARDWARE.md). Verifica il modulo IR prima di alimentarlo. Facoltativamente copia `include/private_settings.example.h` in `include/private_settings.h` e inserisci **solo nella copia locale** credenziali Wi-Fi/admin e, se necessario, IPv4 statico. Questa configurazione vale al primo avvio, non sovrascrive le impostazioni gia\u0027 salvate in LittleFS.
 2. Installa Python e PlatformIO: `python -m pip install platformio==6.2.0`.
 3. Compila e carica tramite USB (scegli la scheda):
 
@@ -36,6 +38,7 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 6. Trova l'indirizzo locale nel DHCP del router. Verifica i valori MQTT, le unità, la distinzione fra carico totale e altre potenze e le convenzioni del segno. Se i messaggi arrivano solo come retained, l'automazione resta bloccata: configurare pubblicazioni periodiche live sul broker.
 7. Configura il sensore e le soglie AGM adatte al tuo banco. Non copiare soglie di tensione da impianti con tensione nominale diversa.
 8. Esegui [COMMISSIONING.md](docs/COMMISSIONING.md), verifica i comandi IR e abilita l'automazione soltanto dopo le prove.
+9. Per verificare nuovi firmware direttamente da GitHub apri `/update`, consulta il canale firmware-stable e scegli l'installazione. Vedere [OTA.md](docs/OTA.md).
 
 Al riavvio il controller entra sempre in **Forza OFF con stato fisico sconosciuto**. Non invia un toggle e non presume che il climatizzatore sia spento. Se dispone già di codici discreti verificati, Forza OFF o una protezione possono inviare un unico OFF preventivo anche da stato sconosciuto. L'ultima modalità richiesta è salvata a fini diagnostici; la ripartenza automatica dopo un reset richiede una nuova conferma fisica o un comando OFF discreto. Questa scelta evita avvii e inversioni inattesi dopo OTA o interruzioni di alimentazione.
 
