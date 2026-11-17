@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "layout": "4m1m",
+  "boards": {
+    "nodemcuv2": {
+      "size": 550784,
+      "sha256": "6339a06ad78b7446dfb5ff7d9a9829d24efaac3e1de303e4501c2085b426d306"
+    },
+    "d1_mini": {
+      "size": 550784,
+      "sha256": "f5a180832b5ed060a6acf049d0dbf7f146b2b5f5b354a933bf949d3b592bce22"
+    }
+  }
+}
