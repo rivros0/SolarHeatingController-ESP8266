@@ -45,7 +45,6 @@ static bool validStaticNetwork(const Config& c) {
     return false;
   }
 
-  uint32_t m=uint32_t(mask);
   // lwIP memorizza la maschera in ordine di byte little-endian.
   // Per la verifica di contiguita' utilizziamo gli ottetti nell'ordine IPv4.
   uint32_t networkMask=0;
