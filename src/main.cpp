@@ -105,6 +105,7 @@ void stateRoute() {
   DynamicJsonDocument doc(4096); JsonObject o=doc.to<JsonObject>(); uint32_t now=millis();
   o["version"]=VERSION; o["csrf"]=csrf; o["uptime"]=now/1000;
   o["wifi"]=WiFi.status()==WL_CONNECTED; o["mqtt"]=mqtt.connected();
+  o["localIp"]=WiFi.localIP().toString(); o["staticIpEnabled"]=cfg.staticIp.length()>0;
   o["heap"]=ESP.getFreeHeap(); o["maxBlock"]=ESP.getMaxFreeBlockSize();
   o["otaSpace"]=ESP.getFreeSketchSpace(); o["storage"]=storageReady;
   o["resetReason"]=ESP.getResetReason(); o["lastMqttAgeMs"]=elapsed(now,lastMqttAt);
@@ -327,7 +328,31 @@ void setup() {
   Wire.begin(4,5); sensorPresent=sht.begin(0x44);
   infrared.begin();
   WiFi.persistent(false); WiFi.mode(WIFI_AP_STA); WiFi.setAutoReconnect(true);
-  if(cfg.ssid.length()) WiFi.begin(cfg.ssid.c_str(),cfg.wifiPassword.c_str());
+  if(cfg.ssid.length()) {
+    // Imposta l'eventuale IP statico PRIMA della connessione alla rete Wi-Fi.
+    // In assenza di staticIp il comportamento resta DHCP come in precedenza.
+    if(cfg.staticIp.length()>0) {
+      IPAddress local,gateway,subnet,dns1,dns2;
+      bool valid=local.fromString(cfg.staticIp) &&
+        gateway.fromString(cfg.staticGateway) && subnet.fromString(cfg.staticSubnet);
+      if(cfg.staticDns1.length()>0) {
+        valid=valid && dns1.fromString(cfg.staticDns1);
+      } else {
+        dns1=gateway;
+      }
+      if(cfg.staticDns2.length()>0) {
+        valid=valid && dns2.fromString(cfg.staticDns2);
+      }
+      if(valid && WiFi.config(local,gateway,subnet,dns1,dns2)) {
+        logEvent(String("Wi-Fi statico configurato: ")+local.toString());
+      } else {
+        logEvent("IP statico non applicabile: Wi-Fi non avviato");
+        Serial.println(F("ERRORE: Wi-Fi statico invalido o WiFi.config fallita."));
+        return;
+      }
+    }
+    WiFi.begin(cfg.ssid.c_str(),cfg.wifiPassword.c_str());
+  }
   // Recovery AP is available on first setup, and after 30s without station Wi-Fi.
   if(!cfg.ssid.length()) recoveryAP=WiFi.softAP(("SolarHeat-"+String(ESP.getChipId(),HEX)).c_str(),cfg.adminPassword.c_str());
   mqtt.setServer(cfg.mqttHost.c_str(),cfg.mqttPort); mqtt.setKeepAlive(cfg.mqttKeepalive);
