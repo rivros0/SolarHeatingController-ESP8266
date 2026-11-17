@@ -7,6 +7,8 @@ non viene mai usato TLS in modalita' setInsecure().
 """
 from pathlib import Path
 
+Import("env")
+
 ROOTS = (
     "ISRG_Root_X1",
     "Sectigo_Public_Server_Authentication_Root_E46",
@@ -15,7 +17,7 @@ ROOTS = (
 )
 
 def prepare_ca_header():
-    project = Path(__file__).resolve().parent.parent
+    project = Path(env.subst("$PROJECT_DIR")).resolve()
     output = project / "include" / "github_ca_roots.h"
     certificates = []
 
