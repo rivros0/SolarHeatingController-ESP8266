@@ -1,4 +1,5 @@
 #include "config.h"
+#include <ESP8266WiFi.h>
 
 // Credenziali locali opzionali: NON vengono incluse nella repository pubblica.
 #if __has_include("private_settings.h")
