@@ -1,10 +1,17 @@
 #include "config.h"
+#include <ESP8266WiFi.h>
+
+// Credenziali locali opzionali: NON vengono incluse nella repository pubblica.
+#if __has_include("private_settings.h")
+#include "private_settings.h"
+#define SOLAR_HAS_PRIVATE_SETTINGS 1
+#endif
 Config cfg;
 bool storageReady=false,configReady=false;
 static void encode(JsonObject o,const Config& c,bool secrets) {
   o["version"]=2;
 #define FIELD(n) o[#n]=c.n
-  FIELD(ssid); FIELD(mqttHost); FIELD(mqttUser); FIELD(adminUser); FIELD(discovery);
+  FIELD(ssid); FIELD(staticIp); FIELD(staticGateway); FIELD(staticSubnet); FIELD(staticDns1); FIELD(staticDns2); FIELD(mqttHost); FIELD(mqttUser); FIELD(adminUser); FIELD(discovery);
   FIELD(irFingerprint); FIELD(protocol); FIELD(powerKind); FIELD(fan); FIELD(model); FIELD(setpoint);
   FIELD(mqttPort); FIELD(mqttKeepalive); FIELD(sampleMs); FIELD(historyMs); FIELD(forceOnMs);
   FIELD(filterAlpha); FIELD(receiver); FIELD(irVerified); FIELD(automationEnabled);
@@ -25,12 +32,55 @@ static void encode(JsonObject o,const Config& c,bool secrets) {
 }
 void configJson(JsonObject o,bool secrets) { encode(o,cfg,secrets); }
 static bool bounded(float v,float lo,float hi) { return isfinite(v)&&v>=lo&&v<=hi; }
+// Verifica rigorosa della configurazione statica. Nessuna impostazione DHCP
+// parzialmente riempita viene interpretata come indirizzo statico valido.
+static bool validStaticNetwork(const Config& c) {
+  if(c.staticIp.length()==0) {
+    return c.staticGateway.length()==0 && c.staticDns1.length()==0 &&
+      c.staticDns2.length()==0 &&
+      (c.staticSubnet.length()==0 || c.staticSubnet=="255.255.255.0");
+  }
+  IPAddress local, gateway, mask, dns1, dns2;
+  if(!local.fromString(c.staticIp) || !gateway.fromString(c.staticGateway) ||
+     !mask.fromString(c.staticSubnet)) {
+    return false;
+  }
+
+  // lwIP memorizza la maschera in ordine di byte little-endian.
+  // Per la verifica di contiguita' utilizziamo gli ottetti nell'ordine IPv4.
+  uint32_t networkMask=0;
+  for(int i=0;i<4;i++) {
+    networkMask=(networkMask<<8)|mask[i];
+  }
+  if(networkMask==0 || networkMask==0xFFFFFFFFUL) return false;
+  uint32_t inverted=~networkMask;
+  if((inverted & (inverted+1))!=0) return false;
+  if(local==IPAddress(0,0,0,0) || gateway==IPAddress(0,0,0,0)) return false;
+  if(local[0]==127 || local[0]>=224 || gateway[0]>=224) return false;
+  for(int i=0;i<4;i++) {
+    if((local[i]&mask[i])!=(gateway[i]&mask[i])) return false;
+  }
+  uint32_t ip=0;
+  uint32_t gw=0;
+  for(int i=0;i<4;i++) {
+    ip=(ip<<8)|local[i];
+    gw=(gw<<8)|gateway[i];
+  }
+  uint32_t hostMask=~networkMask;
+  if((ip&hostMask)==0 || (ip&hostMask)==hostMask) return false;
+  if((gw&hostMask)==0 || (gw&hostMask)==hostMask) return false;
+  if(ip==gw) return false;
+  if(c.staticDns1.length()>0 && !dns1.fromString(c.staticDns1)) return false;
+  if(c.staticDns2.length()>0 && !dns2.fromString(c.staticDns2)) return false;
+  if(c.staticDns2.length()>0 && c.staticDns1.length()==0) return false;
+  return true;
+}
 bool parseConfig(JsonObjectConst o,Config& c,String& error) {
   // v1 used the same flat schema but had no explicit opt-in. Migration disables automation.
   int version=o["version"]|0;
   if(version!=1 && version!=2) { error="Versione configurazione non supportata"; return false; }
 #define READ_FIELD(n) if(o.containsKey(#n)) { if(!o[#n].is<decltype(c.n)>()) { error="Tipo non valido: " #n; return false; } c.n=o[#n].as<decltype(c.n)>(); }
-  READ_FIELD(ssid); READ_FIELD(wifiPassword); READ_FIELD(mqttHost); READ_FIELD(mqttUser); READ_FIELD(mqttPassword); READ_FIELD(adminUser); READ_FIELD(adminPassword);
+  READ_FIELD(ssid); READ_FIELD(wifiPassword); READ_FIELD(staticIp); READ_FIELD(staticGateway); READ_FIELD(staticSubnet); READ_FIELD(staticDns1); READ_FIELD(staticDns2); READ_FIELD(mqttHost); READ_FIELD(mqttUser); READ_FIELD(mqttPassword); READ_FIELD(adminUser); READ_FIELD(adminPassword);
   READ_FIELD(irFingerprint); READ_FIELD(discovery); READ_FIELD(protocol); READ_FIELD(powerKind); READ_FIELD(fan); READ_FIELD(model); READ_FIELD(setpoint); READ_FIELD(mqttPort); READ_FIELD(mqttKeepalive);
   READ_FIELD(sampleMs); READ_FIELD(historyMs); READ_FIELD(forceOnMs); READ_FIELD(filterAlpha); READ_FIELD(receiver); READ_FIELD(irVerified); READ_FIELD(automationEnabled);
 #undef READ_FIELD
@@ -50,7 +100,7 @@ bool parseConfig(JsonObjectConst o,Config& c,String& error) {
   auto& a=c.energy; auto& b=c.detector;
   bool good=c.model>=1 && c.model<=2 && c.ssid.length()<=32 && c.wifiPassword.length()<=63 && c.mqttHost.length()<=128 &&
     c.mqttUser.length()<=64 && c.mqttPassword.length()<=128 && c.adminUser.length()>0 && c.adminUser.length()<=32 &&
-    c.adminPassword.length()>=12 && c.adminPassword.length()<=63 && c.discovery.length()<=128 &&
+    c.adminPassword.length()>=12 && c.adminPassword.length()<=63 && validStaticNetwork(c) && c.discovery.length()<=128 &&
     c.mqttPort>0 && c.mqttKeepalive>=5 && c.mqttKeepalive<=300 &&
     c.sampleMs>=1000 && c.sampleMs<=30000 && c.historyMs>=10000 && c.historyMs<=3600000 &&
     c.forceOnMs>=60000 && c.forceOnMs<=86400000 && bounded(c.filterAlpha,0.01,1) &&
@@ -102,6 +152,59 @@ void loadConfig() {
   if(exists) { Serial.println(F("Configurazione corrotta/futura: recuperare via USB. Nessuna sovrascrittura.")); return; }
   char password[25]; snprintf(password,sizeof(password),"%08lx%08lx%08lx",os_random(),os_random(),os_random());
   cfg.adminPassword=password;
+
+  // Le credenziali compile-time sono soltanto valori iniziali.
+  // Se LittleFS contiene gia' config.json/config.bak, questo ramo non e'
+  // eseguito, quindi gli aggiornamenti firmware NON sovrascrivono il Wi-Fi.
+  bool usesPrivateSettings=false;
+#ifdef SOLAR_HAS_PRIVATE_SETTINGS
+  String initialSsid=SOLAR_WIFI_SSID;
+  String initialWifiPassword=SOLAR_WIFI_PASSWORD;
+  String initialAdmin=SOLAR_ADMIN_USERNAME;
+  String initialAdminPassword=SOLAR_ADMIN_PASSWORD;
+
+  bool wifiValid=initialSsid.length()<=32 && initialWifiPassword.length()<=63;
+  if(initialSsid.length()>0 && initialWifiPassword.length()>0) {
+    wifiValid=wifiValid && initialWifiPassword.length()>=8;
+  }
+  bool adminValid=initialAdmin.length()>0 && initialAdmin.length()<=32 &&
+    initialAdminPassword.length()>=12 && initialAdminPassword.length()<=63;
+
+  // Il file .example contiene segnaposto volutamente non utilizzabili.
+  bool placeholders=initialSsid=="INSERISCI_NOME_RETE_WIFI" ||
+    initialWifiPassword=="INSERISCI_PASSWORD_WIFI" ||
+    initialAdminPassword=="INSERISCI_PASSWORD_ADMIN_ALMENO_12_CARATTERI";
+
+  if(!wifiValid || !adminValid || placeholders) {
+    Serial.println(F("File privato incompleto: uso AP di configurazione con password casuale."));
+  } else {
+    Config candidate=cfg;
+    candidate.ssid=initialSsid;
+    candidate.wifiPassword=initialWifiPassword;
+    candidate.staticIp=SOLAR_STATIC_IP;
+    candidate.staticGateway=SOLAR_STATIC_GATEWAY;
+    candidate.staticSubnet=SOLAR_STATIC_SUBNET;
+    candidate.staticDns1=SOLAR_STATIC_DNS1;
+    candidate.staticDns2=SOLAR_STATIC_DNS2;
+    candidate.adminUser=initialAdmin;
+    candidate.adminPassword=initialAdminPassword;
+
+    if(!validStaticNetwork(candidate)) {
+      Serial.println(F("IPv4 statico incompleto: uso AP con credenziali casuali."));
+    } else {
+      cfg=candidate;
+      usesPrivateSettings=true;
+    }
+  }
+#endif
+
   configReady=saveConfig(cfg);
-  if(configReady) { Serial.println(F("PRIMO AVVIO - utente admin, password web/AP:")); Serial.println(cfg.adminPassword); }
+  if(configReady) {
+    if(usesPrivateSettings) {
+      Serial.println(F("PRIMO AVVIO - Wi-Fi e credenziali iniziali lette dal file privato."));
+    } else {
+      Serial.println(F("PRIMO AVVIO - utente admin, password web/AP:"));
+      Serial.println(cfg.adminPassword);
+    }
+  }
 }

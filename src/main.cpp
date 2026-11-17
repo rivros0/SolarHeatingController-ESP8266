@@ -8,9 +8,11 @@
 #include <memory>
 #include "config.h"
 #include "ir_manager.h"
+#include "github_ota.h"
+#include <time.h>
 #include "environment_manager.h"
 using namespace solar;
-static const char* VERSION="0.1.0";
+static const char* VERSION="0.2.0";
 ESP8266WebServer web(80);
 AsyncMqttClient mqtt;
 Adafruit_SHT31 sht;
@@ -103,8 +105,9 @@ bool command(bool on,const String& why,bool diagnostic=false,bool physical=false
 void stateRoute() {
   if(!authenticated()) return;
   DynamicJsonDocument doc(4096); JsonObject o=doc.to<JsonObject>(); uint32_t now=millis();
-  o["version"]=VERSION; o["csrf"]=csrf; o["uptime"]=now/1000;
+  o["version"]=VERSION; o["firmwareBoard"]=githubFirmwareBoard(); o["csrf"]=csrf; o["uptime"]=now/1000;
   o["wifi"]=WiFi.status()==WL_CONNECTED; o["mqtt"]=mqtt.connected();
+  o["localIp"]=WiFi.localIP().toString(); o["staticIpEnabled"]=cfg.staticIp.length()>0;
   o["heap"]=ESP.getFreeHeap(); o["maxBlock"]=ESP.getMaxFreeBlockSize();
   o["otaSpace"]=ESP.getFreeSketchSpace(); o["storage"]=storageReady;
   o["resetReason"]=ESP.getResetReason(); o["lastMqttAgeMs"]=elapsed(now,lastMqttAt);
@@ -282,6 +285,67 @@ void setupRoutes() {
     if(!infrared.known||infrared.on) { web.send(409,"text/plain","Confermare climatizzatore fisicamente spento in diagnostica"); return; }
     rebootAt=millis()+1500; web.send(200,"application/json","{}");
   });
+  // Endpoint espressamente richiesti dall'amministratore. Nessun firmware
+  // viene scaricato/installato automaticamente all'avvio o durante il polling.
+  web.on("/api/github-update",HTTP_GET,[] {
+    if(!authenticated()) return;
+    GithubFirmwareInfo info;
+    String error;
+    DynamicJsonDocument response(640);
+    bool checked=githubFirmwareCheck(VERSION,info,error);
+    response["checked"]=checked;
+    response["board"]=githubFirmwareBoard();
+    response["installed"]=VERSION;
+    if(checked) {
+      response["version"]=info.version;
+      response["size"]=info.size;
+      response["available"]=info.available;
+    } else {
+      response["error"]=error;
+      response["available"]=false;
+    }
+    jsonReply(response);
+  });
+
+  web.on("/api/github-update",HTTP_POST,[] {
+    if(!mutation()) return;
+    // Non avviare OTA in assenza di stato fisico OFF confermato.
+    if(!infrared.known || infrared.on) {
+      web.send(409,"text/plain","Confermare che il climatizzatore sia fisicamente spento.");
+      return;
+    }
+    if(updateActive) {
+      web.send(409,"text/plain","Aggiornamento gia' in corso.");
+      return;
+    }
+    mode=Mode::ForceOff;
+    GithubFirmwareInfo info;
+    String error;
+    if(!githubFirmwareCheck(VERSION,info,error)) {
+      web.send(502,"text/plain",error);
+      return;
+    }
+    if(!info.available) {
+      web.send(409,"text/plain","Nessuna versione successiva disponibile.");
+      return;
+    }
+    updateActive=true;
+    logEvent(String("GitHub OTA iniziato: ")+info.version);
+    bool installed=githubFirmwareInstall(info,error);
+    updateActive=false;
+    if(!installed) {
+      logEvent(String("GitHub OTA fallito: ")+error);
+      web.send(502,"text/plain",error);
+      return;
+    }
+    logEvent(String("GitHub OTA completato: ")+info.version);
+    DynamicJsonDocument response(256);
+    response["installed"]=true;
+    response["version"]=info.version;
+    jsonReply(response);
+    rebootAt=millis()+1500;
+  });
+
   web.on("/update",HTTP_GET,[] {
     if(!authenticated()) return;
     File f=LittleFS.open("/update.html","r");
@@ -327,7 +391,33 @@ void setup() {
   Wire.begin(4,5); sensorPresent=sht.begin(0x44);
   infrared.begin();
   WiFi.persistent(false); WiFi.mode(WIFI_AP_STA); WiFi.setAutoReconnect(true);
-  if(cfg.ssid.length()) WiFi.begin(cfg.ssid.c_str(),cfg.wifiPassword.c_str());
+  if(cfg.ssid.length()) {
+    // Imposta l'eventuale IP statico PRIMA della connessione alla rete Wi-Fi.
+    // In assenza di staticIp il comportamento resta DHCP come in precedenza.
+    if(cfg.staticIp.length()>0) {
+      IPAddress local,gateway,subnet,dns1,dns2;
+      bool valid=local.fromString(cfg.staticIp) &&
+        gateway.fromString(cfg.staticGateway) && subnet.fromString(cfg.staticSubnet);
+      if(cfg.staticDns1.length()>0) {
+        valid=valid && dns1.fromString(cfg.staticDns1);
+      } else {
+        dns1=gateway;
+      }
+      if(cfg.staticDns2.length()>0) {
+        valid=valid && dns2.fromString(cfg.staticDns2);
+      }
+      if(valid && WiFi.config(local,gateway,subnet,dns1,dns2)) {
+        logEvent(String("Wi-Fi statico configurato: ")+local.toString());
+      } else {
+        logEvent("IP statico non applicabile: Wi-Fi non avviato");
+        Serial.println(F("ERRORE: Wi-Fi statico invalido o WiFi.config fallita."));
+        return;
+      }
+    }
+    WiFi.begin(cfg.ssid.c_str(),cfg.wifiPassword.c_str());
+    // NTP: necessario alla verifica temporale dei certificati HTTPS.
+    configTime(0,0,"pool.ntp.org","time.google.com");
+  }
   // Recovery AP is available on first setup, and after 30s without station Wi-Fi.
   if(!cfg.ssid.length()) recoveryAP=WiFi.softAP(("SolarHeat-"+String(ESP.getChipId(),HEX)).c_str(),cfg.adminPassword.c_str());
   mqtt.setServer(cfg.mqttHost.c_str(),cfg.mqttPort); mqtt.setKeepAlive(cfg.mqttKeepalive);

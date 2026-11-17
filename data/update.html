@@ -1,3 +1,189 @@
-<!doctype html><html lang="it"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aggiornamento Solar Heating</title><link rel="stylesheet" href="/style.css"><main><section class="panel"><p class="eyebrow">MANUTENZIONE LOCALE</p><h1>Aggiorna il firmware.</h1><p>Verifica che il climatizzatore sia fisicamente spento e confermalo in Diagnostica. Carica solo firmware.bin per la tua scheda. La configurazione LittleFS viene conservata. Usa la LAN o una VPN; non esporre questa pagina a Internet.</p><form id="upload"><label>Firmware .bin<input type="file" id="file" accept=".bin" required></label><div class="controls"><button>Carica firmware</button><a class="button secondary" href="/">Dashboard</a></div></form><progress id="progress" value="0" max="100"></progress><p id="result" role="status"></p></section></main><script>
-document.getElementById('upload').onsubmit=async e=>{e.preventDefault();const result=document.getElementById('result'),button=e.target.querySelector('button');button.disabled=true;try{const r=await fetch('/api/state',{cache:'no-store'});if(!r.ok)throw Error('Autenticazione non riuscita');const state=await r.json();if(state.commanded!=='off')throw Error('Confermare climatizzatore spento in Diagnostica');const file=document.getElementById('file').files[0];if(!file||!file.name.endsWith('.bin')||file.size>state.otaSpace-4096)throw Error('File assente, formato o dimensione non validi');const data=new FormData();data.append('firmware',file);const xhr=new XMLHttpRequest();xhr.open('POST','/update');xhr.setRequestHeader('X-CSRF-Token',state.csrf);xhr.upload.onprogress=e=>{if(e.lengthComputable)document.getElementById('progress').value=e.loaded/e.total*100;};xhr.onload=()=>{result.textContent=xhr.responseText;button.disabled=false;};xhr.onerror=()=>{result.textContent='Connessione interrotta. Verificare versione e stato del dispositivo prima di riprovare.';button.disabled=false;};result.textContent='Caricamento in corso. Non togliere alimentazione.';xhr.send(data);}catch(error){result.textContent=error.message;button.disabled=false;}};
-</script></html>
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Aggiornamento Solar Heating</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <section class="panel">
+    <p class="eyebrow">MANUTENZIONE DEL DISPOSITIVO</p>
+    <h1>Aggiornamento firmware</h1>
+    <p>Prima di aggiornare spegni il climatizzatore e confermane lo stato fisico nella
+      sezione Diagnostica. La configurazione LittleFS viene conservata; l'installazione
+      richiede alimentazione e Wi-Fi stabili.</p>
+    <a class="button secondary" href="/">Torna alla dashboard</a>
+  </section>
+
+  <section class="panel">
+    <h2>Direttamente da GitHub</h2>
+    <p>Canale <strong>firmware-stable</strong> dedicato alle versioni verificate del firmware.
+      Le release CAD non vengono considerate. Controllo HTTPS, versione, scheda,
+      dimensioni e checksum SHA256 prima dell'installazione.</p>
+    <dl id="githubInfo"></dl>
+    <div class="controls">
+      <button id="checkGitHub" type="button">Verifica aggiornamenti</button>
+      <button id="installGitHub" type="button" disabled>Installa da GitHub</button>
+    </div>
+    <p id="githubStatus" role="status" aria-live="polite"></p>
+    <small>L'ESP8266 necessita di DNS e accesso a Internet per questa funzione.
+      Il caricamento locale riportato di seguito continua a funzionare anche senza GitHub.</small>
+  </section>
+
+  <section class="panel">
+    <h2>Aggiornamento manuale da file .bin</h2>
+    <p>Carica esclusivamente il file <code>firmware.bin</code> compilato per la scheda corretta.
+      Non caricare <code>littlefs.bin</code> in questa pagina.</p>
+    <form id="upload">
+      <label>Firmware .bin
+        <input type="file" id="file" accept=".bin" required>
+      </label>
+      <div class="controls"><button type="submit">Carica firmware</button></div>
+    </form>
+    <progress id="progress" value="0" max="100"></progress>
+    <p id="result" role="status" aria-live="polite"></p>
+  </section>
+</main>
+<script>
+"use strict";
+
+let candidateAvailable=false;
+
+async function requestState() {
+  const response=await fetch("/api/state",{cache:"no-store"});
+  if(!response.ok) {
+    throw new Error("Autenticazione non riuscita.");
+  }
+  return response.json();
+}
+
+function requireDeviceOff(state) {
+  if(state.commanded!=="off") {
+    throw new Error("Confermare il climatizzatore fisicamente spento in Diagnostica.");
+  }
+}
+
+function showGitHubResult(info) {
+  const details=document.getElementById("githubInfo");
+  details.replaceChildren();
+
+  const rows=[
+    ["Firmware installato",info.installed],
+    ["Scheda",info.board]
+  ];
+
+  if(info.checked) {
+    rows.push(["Versione disponibile",info.version]);
+    rows.push(["Dimensioni",String(info.size)+" byte"]);
+    rows.push(["Aggiornamento",info.available?"Disponibile":"Nessuna nuova versione"]);
+  }
+  for(const row of rows) {
+    const label=document.createElement("dt");
+    const value=document.createElement("dd");
+    label.textContent=row[0];
+    value.textContent=row[1];
+    details.append(label,value);
+  }
+}
+
+document.getElementById("checkGitHub").onclick=async function() {
+  const button=this;
+  const result=document.getElementById("githubStatus");
+  candidateAvailable=false;
+  document.getElementById("installGitHub").disabled=true;
+  button.disabled=true;
+  result.textContent="Controllo GitHub in corso...";
+  try {
+    const response=await fetch("/api/github-update",{cache:"no-store"});
+    if(!response.ok) {
+      throw new Error(await response.text());
+    }
+    const info=await response.json();
+    showGitHubResult(info);
+    if(!info.checked) {
+      throw new Error(info.error);
+    }
+    candidateAvailable=info.available;
+    document.getElementById("installGitHub").disabled=!candidateAvailable;
+    result.textContent="Verifica completata.";
+  } catch(error) {
+    result.textContent=error.message;
+  }
+  button.disabled=false;
+};
+
+document.getElementById("installGitHub").onclick=async function() {
+  const button=this;
+  const result=document.getElementById("githubStatus");
+  if(!candidateAvailable) {
+    result.textContent="Verificare prima la disponibilità della nuova versione.";
+    return;
+  }
+  if(!confirm("Climatizzatore fisicamente spento? Installare il firmware da GitHub e riavviare il dispositivo?")) {
+    return;
+  }
+  button.disabled=true;
+  document.getElementById("checkGitHub").disabled=true;
+  result.textContent="Download e verifica in corso. Non spegnere l'ESP8266.";
+  try {
+    const state=await requestState();
+    requireDeviceOff(state);
+    const response=await fetch("/api/github-update",{
+      method:"POST",
+      headers:{"X-CSRF-Token":state.csrf},
+      cache:"no-store"
+    });
+    if(!response.ok) {
+      throw new Error(await response.text());
+    }
+    const info=await response.json();
+    result.textContent="Firmware "+info.version+" installato. Riavvio in corso. Verificare la versione al rientro.";
+  } catch(error) {
+    result.textContent=error.message;
+  }
+  button.disabled=false;
+  document.getElementById("checkGitHub").disabled=false;
+};
+
+document.getElementById("upload").onsubmit=async function(event) {
+  event.preventDefault();
+  const result=document.getElementById("result");
+  const button=event.target.querySelector("button");
+  button.disabled=true;
+  try {
+    const state=await requestState();
+    requireDeviceOff(state);
+    const file=document.getElementById("file").files[0];
+    if(!file || !file.name.endsWith(".bin") || file.size>state.otaSpace-4096) {
+      throw new Error("File assente, formato o dimensione non validi.");
+    }
+    const form=new FormData();
+    form.append("firmware",file);
+    const request=new XMLHttpRequest();
+    request.open("POST","/update");
+    request.setRequestHeader("X-CSRF-Token",state.csrf);
+    request.upload.onprogress=function(progress) {
+      if(progress.lengthComputable) {
+        document.getElementById("progress").value=progress.loaded/progress.total*100;
+      }
+    };
+    request.onload=function() {
+      result.textContent=request.responseText;
+      button.disabled=false;
+    };
+    request.onerror=function() {
+      result.textContent="Connessione interrotta. Verificare la versione prima di riprovare.";
+      button.disabled=false;
+    };
+    result.textContent="Caricamento OTA locale in corso. Non togliere alimentazione.";
+    request.send(form);
+  } catch(error) {
+    result.textContent=error.message;
+    button.disabled=false;
+  }
+};
+</script>
+</body>
+</html>

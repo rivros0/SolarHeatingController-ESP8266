@@ -14,6 +14,7 @@ Tutti gli endpoint, inclusi gli asset, richiedono HTTP Basic. Le mutazioni POST 
 | POST | `/api/learn` | Apprendimento: `baseline`, `on`, `off`, `save`, `cancel` |
 | POST | `/api/reboot` | `{}`; richiede stato fisico confermato OFF |
 | GET / POST | `/update` | Pagina OTA / multipart firmware `.bin` |
+| GET / POST | `/api/github-update` | Consulta release `firmware-stable` / installa dopo conferma OFF |
 
 Risposte: 400 richiesta/config non valida; 401 autenticazione; 403 token; 409 stato/procedura incompatibile; 413 corpo eccessivo; 503 configurazione/memoria non disponibile; 507 scrittura configurazione fallita.
 
@@ -26,6 +27,8 @@ Campi principali:
 | Campo | Default | Vincolo |
 |---|---|---|
 | `ssid`, `wifiPassword` | vuoti | max 32/63 caratteri |
+| `staticIp`, `staticGateway`, `staticSubnet` | vuoti = DHCP | IPv4 validi e gateway nella sottorete |
+| `staticDns1`, `staticDns2` | vuoti | IPv4 validi; DNS2 richiede DNS1 |
 | `adminUser` | admin | 1–32 |
 | `adminPassword` | casuale al primo avvio | 12–63 |
 | `mqttHost` | vuoto | max 128 |
@@ -104,3 +107,38 @@ Apprendimento: `{"action":"baseline"}`, poi `{"action":"on","confirmed":true}`, 
 ## Export e accesso
 
 `GET /api/config` esclude wifiPassword, mqttPassword e adminPassword. Non è un backup completo delle credenziali. `GET /api/diagnostics` non legge né serializza credenziali: valori/topic sono quelli inviati dal publisher, quindi limitare il filtro diagnostico a dati energetici. Lo script di storico interroga soltanto history; l'utente sceglie dove conservarlo. L'HTTP sulla LAN richiede protezione della rete o un gateway con TLS.
+
+## Credenziali locali e configurazione IPv4 statica
+
+Il file `include/private_settings.example.h` è un **modello**, non deve
+contenere password reali. Copiarlo in `include/private_settings.h` e inserire
+SSID, password Wi-Fi e amministratore. `private_settings.h` è escluso da Git.
+
+Nel file è possibile specificare anche:
+
+```cpp
+#define SOLAR_STATIC_IP             "192.168.1.90"
+#define SOLAR_STATIC_GATEWAY        "192.168.1.1"
+#define SOLAR_STATIC_SUBNET         "255.255.255.0"
+#define SOLAR_STATIC_DNS1           "192.168.1.1"
+#define SOLAR_STATIC_DNS2           "1.1.1.1"
+```
+
+Tali indirizzi sono **solo esempi**; scegliere un IP riservato al dispositivo
+o escluso dal pool DHCP del router, compatibile con la propria rete.
+
+Lasciare `SOLAR_STATIC_IP` vuoto, e gli altri parametri vuoti a eccezione
+della subnet predefinita, per utilizzare DHCP.
+
+Le impostazioni nel file privato vengono utilizzate **solo durante il primo
+avvio su LittleFS senza configurazione**. Se esiste `/config.json` o
+`/config.bak`, continuano a prevalere i valori della dashboard, anche dopo
+gli aggiornamenti OTA. Per cambiare l'indirizzo di un dispositivo già
+configurato, modificare i campi in dashboard, salvare e riavviare.
+L'IP risultante è visibile in `GET /api/state`.
+
+La configurazione IPv4 statica viene convalidata prima del salvataggio e
+applicata con `WiFi.config()` prima di `WiFi.begin()`. Un indirizzo statico
+sbagliato ma formalmente valido può rendere inaccessibile il dispositivo:
+in tal caso ripristinare la configurazione via USB o usare la rete di recupero
+quando disponibile. Accedere via HTTP solo da LAN affidabile o VPN.

@@ -6,3 +6,12 @@ __pycache__/
 dist/
 .venv/
 *.csv
+
+# Credenziali locali: non pubblicare su GitHub
+include/private_settings.h
+**/secrets.h
+.env
+.env.*
+
+# Header PEM generato da PlatformIO durante la compilazione
+include/github_ca_roots.h
