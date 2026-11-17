@@ -6,6 +6,8 @@
 #include "climate_power_detector.h"
 struct Config {
   String ssid, wifiPassword, mqttHost, mqttUser, mqttPassword;
+  // Se staticIp e' vuoto, DHCP rimane attivo.
+  String staticIp, staticGateway, staticSubnet, staticDns1, staticDns2;
   String adminUser="admin", adminPassword;
   String discovery="solar_assistant/#";
   String topics[9];
