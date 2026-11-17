@@ -45,8 +45,6 @@ jobs:
           set -euo pipefail
           pio run -e nodemcuv2
           pio run -e d1_mini
-          pio run -e nodemcuv2 -t buildfs
-          pio run -e d1_mini -t buildfs
 
       - name: Copia e prepara manifest con SHA256
         shell: bash
