@@ -24,6 +24,10 @@ const requiredIds = [
   "version"
 ];
 
+// Nuovi elementi dedicati all'acquisizione IR: l'aggiunta non deve
+// compromettere gli ID originali (verificati separatamente).
+const receiverIds = ["irReceiverStatus", "irCaptureSummary"];
+
 const tabIds = [
   "overview",
   "charts",
@@ -46,6 +50,19 @@ assert.equal(distinctIds.size, foundIds.length, "Gli ID HTML devono essere univo
 for(const id of requiredIds) {
   assert.ok(distinctIds.has(id), "Controllo originale mancante: " + id);
 }
+
+for(const id of receiverIds) {
+  assert.ok(distinctIds.has(id), "Indicatore ricevitore IR mancante: " + id);
+}
+
+assert.ok(
+  html.includes("G</strong>") && html.includes("R</strong>") && html.includes("Y</strong>"),
+  "La scheda IR deve riportare le etichette G/R/Y del modulo."
+);
+assert.ok(
+  js.includes("async function readIrCapture()"),
+  "Il riepilogo della cattura IR deve restare disponibile."
+);
 
 for(const tabId of tabIds) {
   const buttonId = "tab-button-" + tabId;
