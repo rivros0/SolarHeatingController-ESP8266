@@ -22,6 +22,7 @@ static void encode(JsonObject o,const Config& c,bool secrets) {
   JsonObject e=o.createNestedObject("energy");
 #define E(n) e[#n]=c.energy.n
   E(tempOn); E(tempOff); E(reserveW); E(climateW); E(dischargeW); E(minVoltage); E(maxDischargeA);
+  E(humidityAssist); E(humidityOn); E(humidityOff);
   E(stableMs); E(dropMs); E(restartMs); E(minRunMs); E(staleMs); E(negativeCharge); E(negativeCurrentCharge);
 #undef E
   JsonObject d=o.createNestedObject("detector");
@@ -91,6 +92,7 @@ bool parseConfig(JsonObjectConst o,Config& c,String& error) {
   JsonObjectConst e=o["energy"];
 #define E(n) if(e.containsKey(#n)) { if(!e[#n].is<decltype(c.energy.n)>()) { error="Tipo non valido: energy." #n; return false; } c.energy.n=e[#n].as<decltype(c.energy.n)>(); }
   E(tempOn); E(tempOff); E(reserveW); E(climateW); E(dischargeW); E(minVoltage); E(maxDischargeA);
+  E(humidityAssist); E(humidityOn); E(humidityOff);
   E(stableMs); E(dropMs); E(restartMs); E(minRunMs); E(staleMs); E(negativeCharge); E(negativeCurrentCharge);
 #undef E
   JsonObjectConst d=o["detector"];
@@ -109,6 +111,7 @@ bool parseConfig(JsonObjectConst o,Config& c,String& error) {
     (c.powerKind=="unverified"||c.powerKind=="toggle"||c.powerKind=="discrete") &&
     !(c.protocol!="RAW"&&c.powerKind=="discrete") &&
     bounded(a.tempOn,5,29) && bounded(a.tempOff,a.tempOn+0.5,35) && c.setpoint>=a.tempOff &&
+    bounded(a.humidityOff,30,70) && bounded(a.humidityOn,a.humidityOff+3,85) &&
     bounded(a.reserveW,0,20000) && bounded(a.climateW,100,10000) && bounded(a.dischargeW,0,5000) &&
     bounded(a.minVoltage,0,200) && bounded(a.maxDischargeA,0,500) &&
     a.staleMs>=10000 && a.staleMs<=300000 && c.sampleMs*2<=a.staleMs &&
