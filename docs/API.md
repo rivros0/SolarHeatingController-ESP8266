@@ -8,7 +8,7 @@ Tutti gli endpoint, inclusi gli asset, richiedono HTTP Basic. Le mutazioni POST 
 | GET | `/api/state` | Misure, validità/età, stato, versione, heap, token CSRF |
 | GET / POST | `/api/config` | Configurazione redatta / modifica versionata |
 | POST | `/api/mode` | `{"mode":"auto"}`; alternative `force_on`, `force_off`, `diagnostic` |
-| GET | `/api/history` | Fino a 60 campioni RAM, JSON inviato in streaming |
+| GET | `/api/history` | Fino a 120 campioni RAM, JSON inviato in streaming |
 | GET | `/api/diagnostics` | Fino a 16 eventi e 12 topic osservati |
 | GET / POST | `/api/ir` | Cattura corrente e slot / prove e salvataggio |
 | POST | `/api/learn` | Apprendimento: `baseline`, `on`, `off`, `save`, `cancel` |
@@ -44,8 +44,20 @@ Campi principali:
 | `model`, `fan` | 1, auto | id modello 1/2 della libreria; auto/low/medium/high |
 | `setpoint` | 22 °C | 16–30 e almeno tempOff; RAW richiede cattura coerente |
 | `sampleMs`, `filterAlpha` | 5000 ms, 0.25 | 1000–30000 ms; 0.01–1 |
+| `humidityAssist` in `energy` | false | consenso esplicito all'assistenza UR in HEAT |
+| `humidityOn` in `energy` | 60 % | richiesta UR elevata: 3 punti sopra humidityOff, max 85 |
+| `humidityOff` in `energy` | 55 % | rientro: 30–70 % |
 | `historyMs` | 30000 ms | 10000–3600000 ms |
 | `forceOnMs` | 3600000 ms | 60000–86400000 ms |
+
+**UR e storico:** `GET /api/state` include `humidityAssist`,
+`humidityDemand` e `humidityOnlyRun`. I nuovi campi in `energy`
+sono opzionali per compatibilita' con i file di configurazione v2
+esistenti. `GET /api/history` restituisce `t` (°C), `h` (% UR),
+`on` e `known` (stato comandato/dichiarato, non misura indipendente).
+Il nuovo grafico e' parte dei file LittleFS, che vanno aggiornati
+separatamente e con conseguente cancellazione della configurazione
+presente sul dispositivo. La versione HEAT non implementa DRY.
 
 `energy`:
 
