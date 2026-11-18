@@ -43,6 +43,36 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 
 Al riavvio il controller entra sempre in **Forza OFF con stato fisico sconosciuto**. Non invia un toggle e non presume che il climatizzatore sia spento. Se dispone già di codici discreti verificati, Forza OFF o una protezione possono inviare un unico OFF preventivo anche da stato sconosciuto. L'ultima modalità richiesta è salvata a fini diagnostici; la ripartenza automatica dopo un reset richiede una nuova conferma fisica o un comando OFF discreto. Questa scelta evita avvii e inversioni inattesi dopo OTA o interruzioni di alimentazione.
 
+## Ricevitore IR G / R / Y (GND / 3V3 / D6)
+
+E' stato individuato un ricevitore IR a tre pin marcati **G**, **R**, **Y**.
+Sul modulo di questo tipo il cablaggio previsto e':
+**G → GND**, **R → 3V3**, **Y → D6 (GPIO12)**.
+La corrispondenza della sigla all'effettivo piedino va **verificata sul modulo
+disalimentato**: forma e serigrafia non garantiscono da sole una piedinatura
+universale. Verificare alimentazione a 3,3 V prima di collegare la NodeMCU.
+
+La scheda **Infrarossi** contiene ora una guida espandibile ai collegamenti e
+un riepilogo dell'ultima cattura RAW (`protocol`, `length`, lunghezze degli
+slot HEAT ON e OFF). Il JSON completo e' ancora consultabile senza perdere
+i dati tecnici. Per usare il ricevitore, abilitare **Ricevitore GPIO12** in
+**Configurazione → Infrarossi**, salvare e riavviare, poi leggere la cattura
+con il tasto **Leggi acquisizione**.
+
+Per la modalita' **DRY** si puo' eseguire una lettura diagnostica, **ma non
+salvarla negli slot HEAT ON/OFF**: il firmware non dispone ancora di uno slot
+DRY e un salvataggio sostituirebbe un segnale precedentemente verificato.
+
+Le modifiche di questa sezione riguardano documentazione e dashboard, non
+richiedono una nuova versione del firmware. Per visualizzarle sul dispositivo
+e' necessario aggiornare i file in LittleFS. **Non eseguire `uploadfs` senza
+prima aver salvato configurazioni e codici IR**: l'operazione sovrascrive
+l'intero filesystem, comprese password e catture. Un export della dashboard
+non contiene le password ne' i file RAW.
+
+Per la procedura elettrica e di collaudo, vedere
+[docs/HARDWARE.md](docs/HARDWARE.md#modulo-a-tre-pin-g--r--y-ricevitore-ir-trovato-durante-il-collaudo).
+
 ## Dashboard a schede (aggiornamento interfaccia 0.3.0)
 
 La stessa dashboard locale e' suddivisa in cinque schede, senza alterare
