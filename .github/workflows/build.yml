@@ -12,6 +12,8 @@ jobs:
         run: node --check data/app.js
       - name: Test navigazione a schede e preservazione controlli originali
         run: node scripts/test_web_ui.mjs
+      - name: Test etichette temporali grafici
+        run: node scripts/test_chart_time.mjs
   firmware:
     runs-on: ubuntu-latest
     strategy:

@@ -27,7 +27,9 @@
 </section>
 
 <section class="tab-panel" id="tab-charts" role="tabpanel" aria-labelledby="tab-button-charts" hidden>
-  <section class="panel"><h2>Energia nel tempo</h2><div class="legend"><span class="pv">● FV</span><span class="load">● Carichi</span><span class="battery">● Batteria</span><span>│ Eventi ON/OFF</span></div><canvas id="energyChart" role="img" aria-label="Grafico energia in watt, campioni in RAM"></canvas><h3>Temperatura, umidità e stato climatizzatore</h3>
+  <section class="panel"><h2>Energia nel tempo</h2><div class="legend"><span class="pv">● FV</span><span class="load">● Carichi</span><span class="battery">● Batteria</span><span>│ Eventi ON/OFF</span></div><canvas id="energyChart" role="img" aria-label="Grafico energia in watt con orari locali indicativi sull'asse X"></canvas>
+<small>L'asse X mostra l'orario locale ricostruito dall'orologio del browser e dai secondi dall'avvio dell'ESP8266: i riferimenti sono indicativi.</small>
+<h3>Temperatura, umidità e stato climatizzatore</h3>
 <div class="legend">
   <span class="temp">● Temperatura (°C, asse sinistro)</span>
   <span class="humid">● Umidità relativa (%, asse destro)</span>
@@ -35,7 +37,7 @@
   <span class="climate-off">■ Clima OFF</span>
   <span class="climate-unknown">■ Stato ignoto</span>
 </div>
-<canvas id="envChart" role="img" aria-label="Andamento di temperatura e umidità su due scale e fascia dello stato comandato del climatizzatore"></canvas>
+<canvas id="envChart" role="img" aria-label="Temperatura e umidità su due scale, stato comandato del climatizzatore e orari sull'asse X"></canvas>
 <small>120 campioni in RAM (circa un'ora con intervallo di 30 s). La fascia ON/OFF indica lo stato comandato o dichiarato, non una misura fisica indipendente. I vuoti indicano dati non disponibili. Lo storico si azzera al riavvio.</small></section>
 </section>
 
