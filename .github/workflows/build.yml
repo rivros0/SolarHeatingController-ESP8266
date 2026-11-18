@@ -10,6 +10,8 @@ jobs:
       - run: sh scripts/test.sh
       - name: Verifica sintassi dashboard JavaScript
         run: node --check data/app.js
+      - name: Test navigazione a schede e preservazione controlli originali
+        run: node scripts/test_web_ui.mjs
   firmware:
     runs-on: ubuntu-latest
     strategy:

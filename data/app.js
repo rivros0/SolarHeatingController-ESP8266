@@ -1,11 +1,150 @@
 "use strict";
 let csrf="",config={},state={},diagnostics={},pollCount=0;
+
+// Ultimo storico ricevuto: permette il ridisegno immediato al cambio scheda.
+let historyCache = [];
+const TAB_IDS = ["overview", "charts", "settings", "infrared", "diagnostics"];
 const $=id=>document.getElementById(id);
 const number=(v,d=0)=>v===null||v===undefined||!Number.isFinite(v)?"—":v.toLocaleString("it-IT",{maximumFractionDigits:d});
 const notice=text=>{$("notice").textContent=text;};
 async function api(path,data){const r=await fetch(path,{cache:"no-store",headers:data?{"Content-Type":"application/json","X-CSRF-Token":csrf}:{},method:data?"POST":"GET",body:data?JSON.stringify(data):undefined});if(!r.ok)throw new Error(await r.text());return r.json();}
 function download(name,data){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));const a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function dl(id,rows){const el=$(id);el.replaceChildren();for(const [label,value]of rows){const dt=document.createElement("dt"),dd=document.createElement("dd");dt.textContent=label;dd.textContent=value;el.append(dt,dd);}}
+
+// ============================================================================
+// NAVIGAZIONE A SCHEDE
+// I pannelli rimangono nel DOM: pulsanti, campi e API preesistenti non cambiano.
+// La posizione della scheda e' mantenuta nell'hash dell'indirizzo, senza
+// ricaricare la pagina, e ogni scheda e' accessibile da tastiera.
+// ============================================================================
+function tabIdFromHash() {
+  const requestedId = window.location.hash.substring(1);
+  if(TAB_IDS.includes(requestedId)) {
+    return requestedId;
+  }
+  return "overview";
+}
+
+function renderHistoryCharts() {
+  const chartsPanel = $("tab-charts");
+  if(chartsPanel.hidden) {
+    // Un canvas in display:none non ha dimensioni: disegnare adesso lo
+    // azzererebbe. Disegniamo soltanto quando la scheda e' visibile.
+    return;
+  }
+  draw(
+    "energyChart",
+    historyCache,
+    [["pv", "#b58919"], ["load", "#345c82"], ["battery", "#26866d"]],
+    "W"
+  );
+  drawEnvironmentChart(historyCache);
+}
+
+async function updateHistoryForActiveTab() {
+  try {
+    historyCache = await api("/api/history");
+    renderHistoryCharts();
+  } catch(error) {
+    notice("Storico non disponibile: " + error.message);
+  }
+}
+
+function activateTab(tabId, focusTab, updateAddress) {
+  if(!TAB_IDS.includes(tabId)) {
+    tabId = "overview";
+  }
+
+  for(const id of TAB_IDS) {
+    const button = $("tab-button-" + id);
+    const panel = $("tab-" + id);
+    const selected = id === tabId;
+
+    button.setAttribute("aria-selected", String(selected));
+    panel.hidden = !selected;
+
+    if(selected) {
+      button.tabIndex = 0;
+    } else {
+      button.tabIndex = -1;
+    }
+  }
+
+  const selectedButton = $("tab-button-" + tabId);
+
+  if(focusTab) {
+    selectedButton.focus();
+  }
+
+  if(updateAddress) {
+    // Non causa reload e permette di riaprire la scheda via URL.
+    window.history.replaceState(null, "", "#" + tabId);
+  }
+
+  if(tabId === "charts") {
+    // Prima mostra immediatamente i campioni gia' disponibili.
+    renderHistoryCharts();
+    // Poi recupera una versione aggiornata senza attendere il polling.
+    updateHistoryForActiveTab();
+  }
+
+  if(tabId === "diagnostics") {
+    diagnosticsRefresh().catch(function(error) {
+      notice("Diagnostica non disponibile: " + error.message);
+    });
+  }
+}
+
+function moveTabByKeyboard(event) {
+  let direction = 0;
+  const currentId = event.currentTarget.dataset.tab;
+  const currentIndex = TAB_IDS.indexOf(currentId);
+  let targetIndex = currentIndex;
+
+  if(event.key === "ArrowRight") {
+    direction = 1;
+  } else if(event.key === "ArrowLeft") {
+    direction = -1;
+  } else if(event.key === "Home") {
+    targetIndex = 0;
+  } else if(event.key === "End") {
+    targetIndex = TAB_IDS.length - 1;
+  } else {
+    return;
+  }
+
+  event.preventDefault();
+
+  if(direction !== 0) {
+    targetIndex = currentIndex + direction;
+    if(targetIndex >= TAB_IDS.length) {
+      targetIndex = 0;
+    }
+    if(targetIndex < 0) {
+      targetIndex = TAB_IDS.length - 1;
+    }
+  }
+
+  activateTab(TAB_IDS[targetIndex], true, true);
+}
+
+function initializeTabs() {
+  for(const id of TAB_IDS) {
+    const button = $("tab-button-" + id);
+    button.addEventListener("click", function() {
+      activateTab(id, false, true);
+    });
+    button.addEventListener("keydown", moveTabByKeyboard);
+  }
+
+  window.addEventListener("hashchange", function() {
+    activateTab(tabIdFromHash(), false, false);
+  });
+
+  window.addEventListener("resize", renderHistoryCharts);
+  activateTab(tabIdFromHash(), false, false);
+}
+
 async function refresh(){try{state=await api("/api/state");csrf=state.csrf;$("connection").textContent=state.wifi?(state.mqtt?"Wi-Fi + MQTT connessi":"Wi-Fi · MQTT assente"):"Access point locale";
 for(const k of["pv","load"])$(k).textContent=number(state.energy[k].value);
 const b=state.energy.battery.value;$("battery").textContent=number(b===null?null:b*(config.energy?.negativeCharge?-1:1));
@@ -36,7 +175,10 @@ dl("system",[["Indirizzo IP",state.localIp||"—"],["Assegnazione IP",state.stat
 const l=state.learning;$("learnState").textContent=`Fase: ${l.stage} · Spento ${number(l.offW)} W · Acceso ${number(l.onW)} W · Dopo OFF ${number(l.offAfterW)} W · Avvio ${number(l.startupMs/1000)} s · Rumore ${number(l.noiseW)} W`;
 $("version").textContent="Firmware "+state.version;
 if(state.rebootNeeded)notice("Configurazione salvata. Conferma climatizzatore spento e riavvia per applicarla.");
-if(pollCount++%5===0){const h=await api("/api/history");draw("energyChart",h,[["pv","#b58919"],["load","#345c82"],["battery","#26866d"]],"W");drawEnvironmentChart(h);}
+if(pollCount++%5===0) {
+  historyCache = await api("/api/history");
+  renderHistoryCharts();
+}
 }catch(e){notice("Connessione o dati non disponibili: "+e.message);}finally{setTimeout(refresh,3000);}}
 function draw(id,rows,series,unit){const canvas=$(id),r=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;canvas.width=r.width*dpr;canvas.height=r.height*dpr;const c=canvas.getContext("2d");c.scale(dpr,dpr);const w=r.width,h=r.height,p=35;
 const values=rows.flatMap(row=>series.map(([k])=>row[k])).filter(Number.isFinite),lo=Math.min(0,...values),hi=Math.max(1,...values),range=hi-lo;
@@ -275,10 +417,77 @@ const groups=[
 ["Riconoscimento assorbimento",[["detector.baselineMs","Finestra riferimento (ms)","number"],["detector.startupMs","Attesa compressore (ms)","number"],["detector.observationMs","Finestra verifica (ms)","number"],["detector.deltaW","Variazione minima (W)","number"],["detector.maxNoiseW","Rumore massimo (W)","number"]]]];
 function get(obj,path){return path.split(".").reduce((v,k)=>v?.[k],obj);}
 function set(obj,path,value){const keys=path.split("."),last=keys.pop();let target=obj;for(const key of keys)target=target[key]||(target[key]={});target[last]=value;}
-function fields(){for(const[title,items]of groups){const section=document.createElement("section");section.className="form-section";const h=document.createElement("h3");h.textContent=title;section.append(h);
-for(const[path,label,type="text"]of items){const l=document.createElement("label");l.className="field";l.append(document.createTextNode(label));const input=document.createElement(Array.isArray(type)?"select":"input");input.dataset.path=path;if(Array.isArray(type)){for(const value of type){const opt=document.createElement("option");opt.value=opt.textContent=value;input.append(opt);}}else input.type=type;
-if(type==="number")input.step="any";if(type==="checkbox")input.checked=!!get(config,path);else input.value=type==="password"?"":get(config,path)??"";if(type==="password")input.autocomplete="new-password";
-l.append(input);section.append(l);}$("fields").append(section);}}
+// ============================================================================
+// CONFIGURAZIONE A GRUPPI ESPANDIBILI
+// Ogni campo originale conserva data-path, tipo, selezione e salvataggio.
+// I <details> riducono lo scorrimento senza escludere campi dal form.
+// ============================================================================
+function fields() {
+  const container = $("fields");
+  container.replaceChildren();
+
+  for(const [title, items] of groups) {
+    const section = document.createElement("details");
+    section.className = "form-section";
+
+    // I parametri d'uso frequente sono visibili subito.
+    if(title === "MQTT SolarAssistant" || title === "Ambiente") {
+      section.open = true;
+    }
+
+    const summary = document.createElement("summary");
+    summary.textContent = title;
+    section.append(summary);
+
+    const body = document.createElement("div");
+    body.className = "form-fields";
+
+    for(const [path, label, type = "text"] of items) {
+      const fieldLabel = document.createElement("label");
+      fieldLabel.className = "field";
+      fieldLabel.append(document.createTextNode(label));
+
+      let input;
+      if(Array.isArray(type)) {
+        input = document.createElement("select");
+        for(const value of type) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = value;
+          input.append(option);
+        }
+      } else {
+        input = document.createElement("input");
+        input.type = type;
+      }
+      input.dataset.path = path;
+
+      if(type === "number") {
+        input.step = "any";
+      }
+
+      if(type === "checkbox") {
+        input.checked = Boolean(get(config, path));
+      } else if(type === "password") {
+        input.value = "";
+        input.autocomplete = "new-password";
+      } else {
+        const currentValue = get(config, path);
+        if(currentValue === undefined || currentValue === null) {
+          input.value = "";
+        } else {
+          input.value = currentValue;
+        }
+      }
+
+      fieldLabel.append(input);
+      body.append(fieldLabel);
+    }
+
+    section.append(body);
+    container.append(section);
+  }
+}
 async function act(fn){try{await fn();notice("Operazione completata.");}catch(e){notice(e.message);}}
 document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>act(()=>api("/api/mode",{mode:b.dataset.mode})));
 $("settings").onsubmit=e=>{e.preventDefault();act(async()=>{const next=structuredClone(config);document.querySelectorAll("[data-path]").forEach(i=>{if(i.type==="password"&&!i.value)return;set(next,i.dataset.path,i.type==="checkbox"?i.checked:i.type==="number"?Number(i.value):i.value);});if($("clearMqtt").checked)next.mqttPassword="";await api("/api/config",next);});};
@@ -291,4 +500,15 @@ for(const[id,action]of[["saveOn","capture_on"],["saveOff","capture_off"]])$(id).
 document.querySelectorAll("[data-learn]").forEach(b=>b.onclick=()=>{const action=b.dataset.learn;if(["on","off"].includes(action)&&!confirm(`Confermi stato fisico ${action==="on"?"SPENTO":"ACCESO"} e invio del comando ${action.toUpperCase()}?`))return;act(()=>api("/api/learn",{action,confirmed:true}));});
 async function diagnosticsRefresh(){diagnostics=await api("/api/diagnostics");$("topics").replaceChildren();for(const row of diagnostics.topics){const tr=document.createElement("tr");for(const value of[row.topic,row.value,number(row.ageMs/1000)+" s",row.retained?"Sì · ignorato":"No"]){const td=document.createElement("td");td.textContent=value;tr.append(td);}$("topics").append(tr);}$("events").textContent=diagnostics.events.map(e=>`${(e.atMs/1000).toFixed(0)}s  ${e.message}`).join("\n");}
 $("refreshDiagnostics").onclick=()=>act(diagnosticsRefresh);$("exportLogs").onclick=()=>act(async()=>download("solar-log.json",await api("/api/diagnostics")));
-(async()=>{try{config=await api("/api/config");fields();await diagnosticsRefresh();}catch(e){notice(e.message);}refresh();})();
+initializeTabs();
+
+(async()=>{
+  try {
+    config=await api("/api/config");
+    fields();
+    await diagnosticsRefresh();
+  } catch(error) {
+    notice(error.message);
+  }
+  refresh();
+})();
