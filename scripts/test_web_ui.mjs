@@ -11,6 +11,8 @@ import { readFileSync } from "node:fs";
 const html = readFileSync("data/index.html", "utf8");
 const js = readFileSync("data/app.js", "utf8");
 const css = readFileSync("data/style.css", "utf8");
+const updateHtml = readFileSync("data/update.html", "utf8");
+const firmware = readFileSync("src/main.cpp", "utf8");
 
 // Tutti gli ID utilizzati dalla dashboard prima della divisione in schede.
 const requiredIds = [
@@ -102,6 +104,41 @@ assert.ok(
 assert.ok(
   js.includes('button.addEventListener("keydown", moveTabByKeyboard)'),
   "La navigazione da tastiera deve restare disponibile."
+);
+
+
+
+// ============================================================================
+// OTA: entrambe le strade di aggiornamento devono chiedere e registrare OFF.
+// La condizione rimane verificata anche lato firmware, prima della scrittura.
+// ============================================================================
+assert.ok(
+  updateHtml.includes("async function confirmDeviceOffForUpdate("),
+  "Manca la conferma di sicurezza sulla pagina OTA."
+);
+assert.ok(
+  updateHtml.includes('fetch("/api/update-confirm-off"'),
+  "La conferma non viene inviata al dispositivo."
+);
+assert.ok(
+  updateHtml.includes("const confirmed=await confirmDeviceOffForUpdate(state);"),
+  "Le azioni OTA devono essere condizionate alla conferma OFF."
+);
+const confirmCallCount = updateHtml.split(
+  "const confirmed=await confirmDeviceOffForUpdate(state);"
+).length - 1;
+assert.equal(
+  confirmCallCount,
+  2,
+  "Sia GitHub OTA sia il caricamento .bin devono richiedere conferma."
+);
+assert.ok(
+  firmware.includes('web.on("/api/update-confirm-off",HTTP_POST'),
+  "Endpoint di conferma fisica OFF assente nel firmware."
+);
+assert.ok(
+  firmware.includes('if(!infrared.known || infrared.on)'),
+  "Il firmware deve mantenere il controllo dello stato fisico prima del GitHub OTA."
 );
 
 console.log(
