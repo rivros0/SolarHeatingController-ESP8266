@@ -154,6 +154,30 @@ void serialPrintStatus(uint32_t now) {
   serialPrintSample("umidita",environment.humidity,now,"%");
   Serial.println();
 
+  // Stato della nuova assistenza UR: informativo, non equivale a DRY.
+  Serial.print(F("[HUMIDITY] assist="));
+  if(cfg.energy.humidityAssist) {
+    Serial.print(F("ON"));
+  } else {
+    Serial.print(F("OFF"));
+  }
+  Serial.print(F(" soglia_on="));
+  Serial.print(cfg.energy.humidityOn,1);
+  Serial.print(F("% soglia_off="));
+  Serial.print(cfg.energy.humidityOff,1);
+  Serial.print(F("% richiesta="));
+  if(manager.humidityDemand()) {
+    Serial.print(F("SI"));
+  } else {
+    Serial.print(F("NO"));
+  }
+  Serial.print(F(" ciclo_solo_UR="));
+  if(manager.humidityOnlyRun()) {
+    Serial.println(F("SI"));
+  } else {
+    Serial.println(F("NO"));
+  }
+
   Serial.print(F("[ENERGY] "));
   serialPrintSample("PV",energy.pv,now,"W");
   Serial.print(' ');
