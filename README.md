@@ -104,6 +104,10 @@ le API, le modalita' di controllo e la persistenza della configurazione:
   modalita' Auto/Forza ON/Forza OFF/Diagnostica e stato del clima.
 - **Grafici**: energia e storico ambiente con due assi °C/UR e fascia
   ON/OFF/ignoto; i grafici vengono ridisegnati all'apertura della scheda.
+  Entrambi riportano sull'asse X **orari locali espliciti** (HH:mm, HH:mm:ss
+  su intervalli brevi), con meno tacche sui display stretti. L'orario e'
+  ricostruito dai secondi dall'avvio dell'ESP e dall'orologio del browser,
+  quindi e' indicativo, non un timestamp certificato dal microcontrollore.
 - **Configurazione**: impostazioni Wi-Fi, MQTT, mappatura topic, soglie
   energetiche/ambientali e IR, in gruppi espandibili; salva, riavvia,
   esportazione redatta e cancellazione password MQTT invariati.
