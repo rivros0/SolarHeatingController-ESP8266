@@ -27,8 +27,8 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 
    ```sh
    pio run -e nodemcuv2
-   pio run -e nodemcuv2 -t upload
    pio run -e nodemcuv2 -t uploadfs
+   pio run -e nodemcuv2 -t upload
    pio device monitor -b 115200
    ```
 
