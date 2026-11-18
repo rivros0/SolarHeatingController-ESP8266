@@ -15,3 +15,6 @@ include/private_settings.h
 
 # Header PEM generato da PlatformIO durante la compilazione
 include/github_ca_roots.h
+
+# HTML OTA generato durante la compilazione firmware
+include/generated_update_page.h

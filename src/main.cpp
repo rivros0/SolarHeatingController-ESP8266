@@ -9,10 +9,11 @@
 #include "config.h"
 #include "ir_manager.h"
 #include "github_ota.h"
+#include "generated_update_page.h"
 #include <time.h>
 #include "environment_manager.h"
 using namespace solar;
-static const char* VERSION="0.3.0";
+static const char* VERSION="0.3.1";
 ESP8266WebServer web(80);
 AsyncMqttClient mqtt;
 Adafruit_SHT31 sht;
@@ -482,6 +483,44 @@ void setupRoutes() {
     if(!infrared.known||infrared.on) { web.send(409,"text/plain","Confermare climatizzatore fisicamente spento in diagnostica"); return; }
     rebootAt=millis()+1500; web.send(200,"application/json","{}");
   });
+  // ======================================================================
+  // CONFERMA DELLO STATO FISICO OFF PRIMA DI UN AGGIORNAMENTO
+  //
+  // La pagina /update presenta un popup di conferma all'operatore.
+  // Questo endpoint registra SOLO la dichiarazione dello stato fisico:
+  // non invia mai comandi IR al climatizzatore.
+  //
+  // Manteniamo le verifiche indipendenti gia' previste nelle due rotte OTA.
+  // La modalita' ForceOff blocca avvii automatici durante la manutenzione,
+  // anche se il download o il caricamento manuale falliscono.
+  // ======================================================================
+  web.on("/api/update-confirm-off",HTTP_POST,[] {
+    if(!mutation()) return;
+    if(updateActive) {
+      web.send(409,"text/plain","Aggiornamento gia' in corso.");
+      return;
+    }
+    StaticJsonDocument<160> doc;
+    if(!body(doc)) return;
+    if(!doc["confirmed"].is<bool>() || !doc["confirmed"].as<bool>()) {
+      web.send(400,"text/plain","Conferma fisica dello spegnimento obbligatoria.");
+      return;
+    }
+
+    mode=Mode::ForceOff;
+    lastRequestedMode="force_off";
+    learning=Learning{};
+    infrared.known=true;
+    infrared.on=false;
+    manager.changed(false,millis());
+    logEvent("OTA: climatizzatore fisicamente spento confermato dall'operatore; nessun IR inviato");
+
+    StaticJsonDocument<128> result;
+    result["commanded"]="off";
+    result["mode"]="force_off";
+    jsonReply(result);
+  });
+
   // Endpoint espressamente richiesti dall'amministratore. Nessun firmware
   // viene scaricato/installato automaticamente all'avvio o durante il polling.
   web.on("/api/github-update",HTTP_GET,[] {
@@ -506,7 +545,8 @@ void setupRoutes() {
 
   web.on("/api/github-update",HTTP_POST,[] {
     if(!mutation()) return;
-    // Non avviare OTA in assenza di stato fisico OFF confermato.
+    // Difesa indipendente dal frontend: il popup da solo non basta.
+    // La conferma deve essere stata registrata nello stato del controller.
     if(!infrared.known || infrared.on) {
       web.send(409,"text/plain","Confermare che il climatizzatore sia fisicamente spento.");
       return;
@@ -545,8 +585,10 @@ void setupRoutes() {
 
   web.on("/update",HTTP_GET,[] {
     if(!authenticated()) return;
-    File f=LittleFS.open("/update.html","r");
-    if(f) { web.streamFile(f,"text/html"); f.close(); } else web.send(503,"text/plain","Caricare LittleFS via USB (uploadfs)");
+    // La pagina OTA e' incorporata nel firmware: un aggiornamento via USB
+    // installa automaticamente il popup senza alterare config e codici LittleFS.
+    web.sendHeader("Cache-Control","no-store");
+    web.send_P(200,PSTR("text/html; charset=utf-8"),UPDATE_PAGE_HTML);
   });
   web.on("/update",HTTP_POST,[] {
     if(!mutation()) return;

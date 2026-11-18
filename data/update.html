@@ -11,9 +11,12 @@
   <section class="panel">
     <p class="eyebrow">MANUTENZIONE DEL DISPOSITIVO</p>
     <h1>Aggiornamento firmware</h1>
-    <p>Prima di aggiornare spegni il climatizzatore e confermane lo stato fisico nella
-      sezione Diagnostica. La configurazione LittleFS viene conservata; l'installazione
-      richiede alimentazione e Wi-Fi stabili.</p>
+    <p>Prima di aggiornare, verifica personalmente che il climatizzatore sia
+      <strong>fisicamente spento</strong>. Al momento dell'installazione comparirà
+      un popup per confermarlo: non occorre tornare nella scheda Infrarossi.
+      La conferma non invia comandi infrarossi e imposta la modalità sicura
+      Forza OFF. La configurazione LittleFS viene conservata; l'installazione
+      richiede alimentazione e connessione stabili.</p>
     <a class="button secondary" href="/">Torna alla dashboard</a>
   </section>
 
@@ -59,10 +62,51 @@ async function requestState() {
   return response.json();
 }
 
-function requireDeviceOff(state) {
-  if(state.commanded!=="off") {
-    throw new Error("Confermare il climatizzatore fisicamente spento in Diagnostica.");
+// ============================================================================
+// CONFERMA OFF PRIMA DELL'INSTALLAZIONE
+//
+// Il popup chiede una conferma fisica esplicita per ogni tentativo OTA.
+// Solo dopo OK la conferma viene registrata sull'ESP8266 con autenticazione
+// e token CSRF. Nessun comando IR viene trasmesso dal controller.
+// Le rotte che eseguono realmente l'OTA mantengono i propri controlli.
+// ============================================================================
+async function confirmDeviceOffForUpdate(state) {
+  const approved=window.confirm(
+    "CONFERMA DI SICUREZZA\n\n" +
+    "Hai verificato personalmente che il climatizzatore sia " +
+    "FISICAMENTE SPENTO?\n\n" +
+    "Premendo OK dichiari lo stato OFF e autorizzi la procedura " +
+    "di aggiornamento. L'ESP8266 non invierà comandi IR. " +
+    "L'automazione rimarrà disabilitata (FORZA OFF).\n\n" +
+    "Premi Annulla se il climatizzatore è acceso oppure non puoi verificarlo."
+  );
+
+  if(!approved) {
+    return false;
   }
+
+  const response=await fetch("/api/update-confirm-off", {
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      "X-CSRF-Token":state.csrf
+    },
+    cache:"no-store",
+    body:JSON.stringify({confirmed:true})
+  });
+
+  if(!response.ok) {
+    throw new Error(
+      "Impossibile registrare la conferma OFF: " + await response.text()
+    );
+  }
+
+  const confirmation=await response.json();
+  if(confirmation.commanded!=="off" || confirmation.mode!=="force_off") {
+    throw new Error("Lo stato OFF non è stato confermato dal dispositivo.");
+  }
+
+  return true;
 }
 
 function showGitHubResult(info) {
@@ -121,15 +165,17 @@ document.getElementById("installGitHub").onclick=async function() {
     result.textContent="Verificare prima la disponibilità della nuova versione.";
     return;
   }
-  if(!confirm("Climatizzatore fisicamente spento? Installare il firmware da GitHub e riavviare il dispositivo?")) {
-    return;
-  }
   button.disabled=true;
   document.getElementById("checkGitHub").disabled=true;
-  result.textContent="Download e verifica in corso. Non spegnere l'ESP8266.";
   try {
     const state=await requestState();
-    requireDeviceOff(state);
+    const confirmed=await confirmDeviceOffForUpdate(state);
+    if(!confirmed) {
+      result.textContent="Aggiornamento annullato: nessuna modifica effettuata.";
+      return;
+    }
+
+    result.textContent="Stato OFF confermato. Download e verifica in corso. Non spegnere l'ESP8266.";
     const response=await fetch("/api/github-update",{
       method:"POST",
       headers:{"X-CSRF-Token":state.csrf},
@@ -142,9 +188,10 @@ document.getElementById("installGitHub").onclick=async function() {
     result.textContent="Firmware "+info.version+" installato. Riavvio in corso. Verificare la versione al rientro.";
   } catch(error) {
     result.textContent=error.message;
+  } finally {
+    button.disabled=false;
+    document.getElementById("checkGitHub").disabled=false;
   }
-  button.disabled=false;
-  document.getElementById("checkGitHub").disabled=false;
 };
 
 document.getElementById("upload").onsubmit=async function(event) {
@@ -154,11 +201,17 @@ document.getElementById("upload").onsubmit=async function(event) {
   button.disabled=true;
   try {
     const state=await requestState();
-    requireDeviceOff(state);
     const file=document.getElementById("file").files[0];
     if(!file || !file.name.endsWith(".bin") || file.size>state.otaSpace-4096) {
       throw new Error("File assente, formato o dimensione non validi.");
     }
+
+    const confirmed=await confirmDeviceOffForUpdate(state);
+    if(!confirmed) {
+      result.textContent="Caricamento annullato: nessuna modifica effettuata.";
+      return;
+    }
+
     const form=new FormData();
     form.append("firmware",file);
     const request=new XMLHttpRequest();
@@ -177,11 +230,20 @@ document.getElementById("upload").onsubmit=async function(event) {
       result.textContent="Connessione interrotta. Verificare la versione prima di riprovare.";
       button.disabled=false;
     };
-    result.textContent="Caricamento OTA locale in corso. Non togliere alimentazione.";
+    request.ontimeout=function() {
+      result.textContent="Timeout di caricamento. Verificare la versione prima di riprovare.";
+      button.disabled=false;
+    };
+    result.textContent="Stato OFF confermato. Caricamento OTA locale in corso. Non togliere alimentazione.";
     request.send(form);
   } catch(error) {
     result.textContent=error.message;
-    button.disabled=false;
+  } finally {
+    // Dopo request.send() il trasferimento prosegue in modo asincrono.
+    // Manteniamo il pulsante bloccato fino a onload/onerror/ontimeout.
+    if(result.textContent.indexOf("Caricamento OTA locale in corso.")<0) {
+      button.disabled=false;
+    }
   }
 };
 </script>
