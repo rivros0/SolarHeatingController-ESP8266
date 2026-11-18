@@ -14,9 +14,33 @@ Tutti gli endpoint, inclusi gli asset, richiedono HTTP Basic. Le mutazioni POST 
 | POST | `/api/learn` | Apprendimento: `baseline`, `on`, `off`, `save`, `cancel` |
 | POST | `/api/reboot` | `{}`; richiede stato fisico confermato OFF |
 | GET / POST | `/update` | Pagina OTA / multipart firmware `.bin` |
+| POST | `/api/update-confirm-off` | `{"confirmed":true}`; registra la conferma fisica OFF prima di OTA, porta in Forza OFF senza inviare IR |
 | GET / POST | `/api/github-update` | Consulta release `firmware-stable` / installa dopo conferma OFF |
 
 Risposte: 400 richiesta/config non valida; 401 autenticazione; 403 token; 409 stato/procedura incompatibile; 413 corpo eccessivo; 503 configurazione/memoria non disponibile; 507 scrittura configurazione fallita.
+
+## Conferma fisica prima dell'aggiornamento OTA
+
+Nella pagina `/update`, sia il pulsante **Installa da GitHub** sia il
+caricamento manuale `.bin` mostrano un popup che chiede all'operatore
+di verificare **personalmente** che il climatizzatore sia spento.
+Solo dopo conferma si invia `POST /api/update-confirm-off` con
+`{"confirmed":true}`, autenticazione HTTP Basic e token CSRF.
+
+La conferma **non** invia comandi IR. Il controller registra lo stato
+fisico dichiarato come OFF e passa a `ForceOff` per impedire avvii durante
+la manutenzione. Annullare il popup non registra alcuna modifica e non
+avvia l'installazione. Rimangono anche i controlli firmware indipendenti
+nelle rotte di aggiornamento (`/api/github-update` e `/update`).
+La conferma vale solo finche' il controller rimane in esecuzione;
+dopo ogni riavvio lo stato fisico torna sconosciuto.
+
+**Distribuzione:** il popup risiede nel file `data/update.html` su LittleFS
+e l'endpoint e' nel firmware **0.3.1**. Aggiornare solo `firmware.bin`
+**non modifica la pagina web** gia' presente nel dispositivo. Per avere il
+popup servono entrambi gli aggiornamenti, anche dei file LittleFS.
+**`uploadfs` sovrascrive configurazioni, password e file IR RAW:** salvarli
+prima, oppure pianificare una distribuzione incrementale delle sole pagine.
 
 ## Configurazione
 
