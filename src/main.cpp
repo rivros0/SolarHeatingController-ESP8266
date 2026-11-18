@@ -110,8 +110,18 @@ void serialPrintStartup() {
 void serialPrintStatus(uint32_t now) {
   Serial.print(F("[STATUS] uptime=")); Serial.print(now/1000UL);
   Serial.print(F("s heap=")); Serial.print(ESP.getFreeHeap());
-  Serial.print(F("B fs=")); Serial.print(storageReady ? F("OK") : F("KO"));
-  Serial.print(F(" config=")); Serial.print(configReady ? F("OK") : F("KO"));
+  Serial.print(F("B fs="));
+  if(storageReady) {
+    Serial.print(F("OK"));
+  } else {
+    Serial.print(F("KO"));
+  }
+  Serial.print(F(" config="));
+  if(configReady) {
+    Serial.print(F("OK"));
+  } else {
+    Serial.print(F("KO"));
+  }
   Serial.print(F(" mode=")); Serial.println(serialModeName());
 
   Serial.print(F("[WIFI] stato="));
