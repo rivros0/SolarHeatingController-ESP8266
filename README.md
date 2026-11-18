@@ -2,7 +2,7 @@
 
 Controller locale per usare il surplus fotovoltaico nel riscaldamento di un climatizzatore Hisense, mantenendo priorità ai carichi domestici e alla ricarica batterie. Firmware Arduino per **NodeMCU ESP8266 e Wemos D1 Mini da 4 MB**, dashboard HTML/CSS/JS su LittleFS, SolarAssistant via MQTT, SHT31 e IRremoteESP8266. Nessun servizio cloud necessario.
 
-**Versione 0.2.1 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
+**Versione 0.3.0 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
 
 ## Funzioni
 
@@ -12,8 +12,9 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 - Rifiuto dei messaggi retained nelle decisioni; scadenza di ogni misura, invalidazione alla disconnessione e attesa di nuovi messaggi live.
 - IR KELON/WHIRLPOOL_AC per prove confermate; acquisizione RAW opzionale a 38 kHz. Automazione esclusivamente con due codici ON/OFF discreti verificati sul dispositivo.
 - Temperatura/umidità SHT31 con filtro EMA, segnalazione errori e tentativi di recupero.
+- **Assistenza UR in HEAT opzionale** (disabilitata di default): richiesta quando UR >=60%, rientro <=55%, soltanto se T < tempOff-0,5 °C e restano rispettate le protezioni energetiche/IR e i tempi. HEAT non rimuove acqua dall'aria; per vera deumidificazione occorre una modalita' DRY verificata separatamente.
 - Stato comandato separato da stima, confidenza e stato sconosciuto; apprendimento guidato e riconoscimento variazioni di carico con riferimento e attesa compressore.
-- Dashboard responsive, grafici senza dipendenze esterne, diagnostica, esportazione configurazione senza credenziali, 60 campioni e 16 eventi in RAM.
+- Dashboard responsive, grafici senza dipendenze esterne, diagnostica, esportazione configurazione senza credenziali, 120 campioni e 16 eventi in RAM.
 - OTA firmware `.bin` autenticato su `/update`, controllo errori, riavvio differito e conservazione LittleFS.
 - Aggiornamento da GitHub (release firmware-stable) con controllo versione, board, HTTPS verificato e SHA256 prima di installare.
 - Credenziali iniziali Wi-Fi/admin in file locale escluso da Git e configurazione IPv4 statico (gateway, subnet, DNS).
@@ -59,6 +60,41 @@ pio device monitor --port /dev/ttyUSB0 --baud 115200 --rts 0 --dtr 0 --filter ti
 **Attenzione:** il bootloader ROM dell'ESP8266 trasmette brevemente a **74880 baud**; sono quindi normali alcuni caratteri incomprensibili *prima* del banner `[BOOT]` leggibile a 115200 baud. Se il banner ricompare continuamente, confrontare il campo `Reset` e verificare alimentazione, RST e collegamenti esterni.
 
 Per aggiornare il firmware dalla USB dopo la prima installazione e' sufficiente `pio run -e nodemcuv2 -t upload --upload-port /dev/ttyUSB0`. **Non ripetere `uploadfs`**: sostituisce il filesystem e cancella credenziali, configurazioni e codici IR acquisiti. La diagnostica seriale non modifica le decisioni energetiche o la sicurezza delle trasmissioni IR.
+
+## Controllo comfort igrometrico (v0.3.0)
+
+La scheda **Configurazione → Ambiente** permette di attivare l'opzione
+`energy.humidityAssist`, impostando `energy.humidityOn` (60% predefinito)
+e `energy.humidityOff` (55%). Le soglie devono rispettare
+`30 <= humidityOff <= 70` e `humidityOff + 3 <= humidityOn <= 85`.
+L'opzione e' **inizialmente disabilitata** anche quando si aggiorna
+una configurazione v2 gia' esistente.
+
+In Automatico, con telemetria live, codici discreti verificati e riserva
+energetica sufficiente, un'umidita' elevata puo' richiedere riscaldamento
+solo sotto `tempOff-0,5 °C`. Non scavalca mai il limite `tempOff`.
+Una richiesta termica (`T < tempOn`) prevale e conserva la normale
+isteresi termica. Se il ciclo era stato avviato esclusivamente per UR,
+l'arresto avviene dopo rientro sotto `humidityOff` e rispetto del tempo
+minimo di funzionamento. Sensore UR assente o dati scaduti non provocano
+nuovi avvii per umidita'; il controllo termico preesistente continua.
+
+**Limite fisico importante:** riscaldare riduce l'umidita' *relativa*,
+ma non sottrae vapore all'ambiente. Per correggere umidita' persistente
+serve ventilazione o una modalita' DRY/deumidificatore dedicato, con
+controlli IR specifici non implementati in questa versione.
+
+Il grafico **Temperatura, umidita' e stato climatizzatore** separa
+gli assi °C e % UR e visualizza una fascia ON/OFF/ignoto del comando
+climatizzatore. Non e' una misura fisica indipendente. Lo storico tiene
+120 campioni in RAM (circa 60 minuti a 30 secondi) e si azzera al
+riavvio. I campioni senza lettura producono intervalli vuoti.
+
+**Aggiornamento dalla v0.2.1:** il nuovo grafico e i nuovi controlli web
+richiedono anche il caricamento del nuovo LittleFS. Prima di `uploadfs`
+annotare/esportare le impostazioni e conservare le credenziali e i
+codici RAW IR: `uploadfs` cancella la configurazione del dispositivo.
+Non usarlo per un aggiornamento esclusivamente del firmware.
 
 ## Logica energetica
 
