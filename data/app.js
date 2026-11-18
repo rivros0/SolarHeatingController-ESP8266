@@ -495,7 +495,34 @@ $("reboot").onclick=()=>act(()=>api("/api/reboot",{}));
 $("export").onclick=()=>act(async()=>download("solar-config-redacted.json",await api("/api/config")));
 for(const[button,on]of[["confirmOff",false],["confirmOn",true]])$(button).onclick=()=>{if(confirm(`Confermi di aver osservato il climatizzatore fisicamente ${on?"acceso":"spento"}?`))act(()=>api("/api/ir",{action:"confirm_state",on,confirmed:true}));};
 for(const[button,on]of[["irOn",true],["irOff",false]])$(button).onclick=()=>{const actual=$("actualState").value;if(actual==="unknown"){notice("Selezionare lo stato fisico osservato prima del test.");return;}if(confirm(`Confermi il climatizzatore fisicamente ${actual.toUpperCase()} e l’invio di un solo comando ${on?"ON HEAT":"OFF"}?`)){act(()=>api("/api/ir",{action:on?"on":"off",actualOn:actual==="on",confirmed:true}));$("actualState").value="unknown";}};
-$("capture").onclick=()=>act(async()=>{$("irCapture").textContent=JSON.stringify(await api("/api/ir"),null,2);});
+// Una cattura e' un segnale ricevuto, non la conferma dello stato reale.
+// Il JSON RAW rimane consultabile per il collaudo senza perdere informazioni.
+async function readIrCapture() {
+  const capture = await api("/api/ir");
+  $("irCapture").textContent = JSON.stringify(capture, null, 2);
+
+  const receivedLength = Number(capture.length);
+  const protocol = String(capture.protocol);
+  const savedOnLength = Number(capture.onLength);
+  const savedOffLength = Number(capture.offLength);
+
+  if(!Number.isFinite(receivedLength) || receivedLength <= 0) {
+    $("irCaptureSummary").textContent =
+      "Nessuna cattura RAW valida disponibile. Controllare G/R/Y, " +
+      "abilitazione ricevitore GPIO12, riavvio e orientamento del telecomando.";
+    return;
+  }
+
+  $("irCaptureSummary").textContent =
+    "Ricevuto: protocollo " + protocol +
+    ", " + receivedLength + " durate RAW. Slot HEAT ON: " +
+    savedOnLength + " durate; slot OFF: " + savedOffLength +
+    " durate. Non salvare come ON/OFF i comandi DRY.";
+}
+
+$("capture").onclick = function() {
+  act(readIrCapture);
+};
 for(const[id,action]of[["saveOn","capture_on"],["saveOff","capture_off"]])$(id).onclick=()=>{if(confirm("Salvare questo segnale? Automazione e verifica IR verranno disabilitate. Il codice deve corrispondere alla funzione scelta sul telecomando originale."))act(()=>api("/api/ir",{action,confirmed:true}));};
 document.querySelectorAll("[data-learn]").forEach(b=>b.onclick=()=>{const action=b.dataset.learn;if(["on","off"].includes(action)&&!confirm(`Confermi stato fisico ${action==="on"?"SPENTO":"ACCESO"} e invio del comando ${action.toUpperCase()}?`))return;act(()=>api("/api/learn",{action,confirmed:true}));});
 async function diagnosticsRefresh(){diagnostics=await api("/api/diagnostics");$("topics").replaceChildren();for(const row of diagnostics.topics){const tr=document.createElement("tr");for(const value of[row.topic,row.value,number(row.ageMs/1000)+" s",row.retained?"Sì · ignorato":"No"]){const td=document.createElement("td");td.textContent=value;tr.append(td);}$("topics").append(tr);}$("events").textContent=diagnostics.events.map(e=>`${(e.atMs/1000).toFixed(0)}s  ${e.message}`).join("\n");}
@@ -506,6 +533,18 @@ initializeTabs();
   try {
     config=await api("/api/config");
     fields();
+
+    // Il valore configurato puo' essere in attesa del riavvio: esplicitarlo.
+    if(config.receiver) {
+      $("irReceiverStatus").textContent =
+        "Ricevitore GPIO12 abilitato nella configurazione. " +
+        "Se hai modificato questa opzione, riavvia prima di acquisire.";
+    } else {
+      $("irReceiverStatus").textContent =
+        "Ricevitore GPIO12 disabilitato. Attivalo in Configurazione → " +
+        "Infrarossi, salva e riavvia prima dell'acquisizione.";
+    }
+
     await diagnosticsRefresh();
   } catch(error) {
     notice(error.message);
