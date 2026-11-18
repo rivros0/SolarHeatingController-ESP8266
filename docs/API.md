@@ -35,12 +35,12 @@ nelle rotte di aggiornamento (`/api/github-update` e `/update`).
 La conferma vale solo finche' il controller rimane in esecuzione;
 dopo ogni riavvio lo stato fisico torna sconosciuto.
 
-**Distribuzione:** il popup risiede nel file `data/update.html` su LittleFS
-e l'endpoint e' nel firmware **0.3.1**. Aggiornare solo `firmware.bin`
-**non modifica la pagina web** gia' presente nel dispositivo. Per avere il
-popup servono entrambi gli aggiornamenti, anche dei file LittleFS.
-**`uploadfs` sovrascrive configurazioni, password e file IR RAW:** salvarli
-prima, oppure pianificare una distribuzione incrementale delle sole pagine.
+**Distribuzione:** il sorgente del popup e' in `data/update.html`
+ma la pagina `/update` e' servita direttamente dal firmware **0.3.1**
+(PROGMEM generato nello step pre-build). Il **solo flash USB di firmware.bin**
+aggiorna anche il popup senza modificare LittleFS e senza perdere
+credenziali o file IR RAW. La dashboard principale resta su LittleFS
+ed e' aggiornata separatamente.
 
 ## Configurazione
 
