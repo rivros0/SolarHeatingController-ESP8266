@@ -46,7 +46,24 @@
 
 <section class="tab-panel" id="tab-infrared" role="tabpanel" aria-labelledby="tab-button-infrared" hidden>
   <div class="columns">
-    <section class="panel"><h2>Banco prova infrarossi</h2><p>Attiva Diagnostica. Prima di ogni test osserva lo stato fisico del climatizzatore. Non ripetere un toggle se l’esito è incerto.</p><div class="controls"><button id="confirmOff" class="secondary">Confermo: fisicamente spento</button><button id="confirmOn" class="secondary">Confermo: fisicamente acceso</button></div><label>Stato fisico osservato prima del test<select id="actualState"><option value="unknown">Seleziona dopo osservazione</option><option value="off">SPENTO</option><option value="on">ACCESO</option></select></label><div class="controls"><button id="irOn">Test HEAT ON</button><button id="irOff" class="secondary">Test OFF</button></div><p>Con ricevitore abilitato, premi il telecomando originale e aggiorna l’acquisizione. Salva ON in HEAT con temperatura e ventola desiderate; RAW riproduce esattamente il segnale registrato.</p><div class="controls"><button id="capture" class="secondary">Leggi acquisizione</button><button id="saveOn" class="secondary">Salva come ON</button><button id="saveOff" class="secondary">Salva come OFF</button></div><pre id="irCapture">Nessuna acquisizione letta</pre></section>
+    <section class="panel"><h2>Banco prova infrarossi</h2>
+<details class="ir-receiver-guide">
+  <summary>Collegare il ricevitore G · R · Y (GPIO12)</summary>
+  <p>Modulo ricevitore IR a tre pin marcati G, R, Y. Controllare prima l'ordine fisico dei pin e la compatibilita' con alimentazione a 3,3 V: la sola foto non sostituisce uno schema del produttore.</p>
+  <table aria-label="Collegamenti ricevitore IR alla NodeMCU">
+    <thead><tr><th>Modulo</th><th>Funzione</th><th>NodeMCU</th></tr></thead>
+    <tbody>
+      <tr><td><strong>G</strong></td><td>Massa</td><td>GND</td></tr>
+      <tr><td><strong>R</strong></td><td>Alimentazione 3,3 V</td><td>3V3</td></tr>
+      <tr><td><strong>Y</strong></td><td>Segnale IR</td><td>D6 / GPIO12</td></tr>
+    </tbody>
+  </table>
+  <small>Spegnere la scheda prima dei collegamenti. Non usare la linea 5 V finché il modulo non è stato identificato con certezza.</small>
+</details>
+<p id="irReceiverStatus" class="reason" aria-live="polite">Stato ricevitore in verifica…</p>
+<p>Attiva Diagnostica. Prima di ogni test osserva lo stato fisico del climatizzatore. Non ripetere un toggle se l’esito è incerto.</p><div class="controls"><button id="confirmOff" class="secondary">Confermo: fisicamente spento</button><button id="confirmOn" class="secondary">Confermo: fisicamente acceso</button></div><label>Stato fisico osservato prima del test<select id="actualState"><option value="unknown">Seleziona dopo osservazione</option><option value="off">SPENTO</option><option value="on">ACCESO</option></select></label><div class="controls"><button id="irOn">Test HEAT ON</button><button id="irOff" class="secondary">Test OFF</button></div><p>Per acquisire: abilita <strong>Configurazione → Infrarossi → Ricevitore GPIO12</strong>, salva e riavvia. Punta il telecomando originale verso il modulo, premi una volta il tasto e seleziona <strong>Leggi acquisizione</strong>. Verifica protocollo e lunghezza prima di salvare.</p>
+<p><strong>Attenzione alla modalità DRY:</strong> puoi leggerla per diagnostica, ma <strong>non salvarla come ON o OFF</strong>. La versione attuale dispone solo degli slot HEAT ON e OFF; una cattura DRY sovrascriverebbe uno di questi segnali. Salvare nuovi codici IR disabilita l'automazione fino alla nuova verifica.</p><div class="controls"><button id="capture" class="secondary">Leggi acquisizione</button><button id="saveOn" class="secondary">Salva come ON</button><button id="saveOff" class="secondary">Salva come OFF</button></div><p id="irCaptureSummary" class="reason" aria-live="polite">Nessuna acquisizione letta.</p>
+<details class="ir-raw-details"><summary>Dettagli tecnici della cattura RAW</summary><pre id="irCapture">Nessuna acquisizione letta</pre></details></section>
     <section class="panel"><h2>Apprendimento guidato</h2><p>Con carichi domestici stabili, verifica che il climatizzatore sia spento e confermane lo stato nel banco prova. Avvia le fasi nell’ordine indicato; attendi il completamento di ogni misura.</p><p id="learnState" class="reason"></p><ol><li>Registra il riferimento a climatizzatore spento.</li><li>Avvia HEAT e registra il consumo dopo il ritardo compressore.</li><li>Spegni e registra la riduzione.</li><li>Salva i parametri stimati e riavvia.</li></ol><div class="controls"><button data-learn="baseline">1. Riferimento</button><button data-learn="on">2. Accendi</button><button data-learn="off">3. Spegni</button><button data-learn="save">4. Salva</button><button data-learn="cancel" class="secondary">Annulla</button></div><small>La stima da un contatore aggregato non identifica con certezza il climatizzatore.</small></section>
   </div>
 </section>
