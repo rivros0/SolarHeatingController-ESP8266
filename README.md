@@ -14,7 +14,7 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 - Temperatura/umidità SHT31 con filtro EMA, segnalazione errori e tentativi di recupero.
 - **Assistenza UR in HEAT opzionale** (disabilitata di default): richiesta quando UR >=60%, rientro <=55%, soltanto se T < tempOff-0,5 °C e restano rispettate le protezioni energetiche/IR e i tempi. HEAT non rimuove acqua dall'aria; per vera deumidificazione occorre una modalita' DRY verificata separatamente.
 - Stato comandato separato da stima, confidenza e stato sconosciuto; apprendimento guidato e riconoscimento variazioni di carico con riferimento e attesa compressore.
-- Dashboard responsive, grafici senza dipendenze esterne, diagnostica, esportazione configurazione senza credenziali, 120 campioni e 16 eventi in RAM.
+- Dashboard responsive **a cinque schede**, grafici senza dipendenze esterne, diagnostica, esportazione configurazione senza credenziali, 120 campioni e 16 eventi in RAM.
 - OTA firmware `.bin` autenticato su `/update`, controllo errori, riavvio differito e conservazione LittleFS.
 - Aggiornamento da GitHub (release firmware-stable) con controllo versione, board, HTTPS verificato e SHA256 prima di installare.
 - Credenziali iniziali Wi-Fi/admin in file locale escluso da Git e configurazione IPv4 statico (gateway, subnet, DNS).
@@ -42,6 +42,38 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 9. Per verificare nuovi firmware direttamente da GitHub apri `/update`, consulta il canale firmware-stable e scegli l'installazione. Vedere [OTA.md](docs/OTA.md).
 
 Al riavvio il controller entra sempre in **Forza OFF con stato fisico sconosciuto**. Non invia un toggle e non presume che il climatizzatore sia spento. Se dispone già di codici discreti verificati, Forza OFF o una protezione possono inviare un unico OFF preventivo anche da stato sconosciuto. L'ultima modalità richiesta è salvata a fini diagnostici; la ripartenza automatica dopo un reset richiede una nuova conferma fisica o un comando OFF discreto. Questa scelta evita avvii e inversioni inattesi dopo OTA o interruzioni di alimentazione.
+
+## Dashboard a schede (aggiornamento interfaccia 0.3.0)
+
+La stessa dashboard locale e' suddivisa in cinque schede, senza alterare
+le API, le modalita' di controllo e la persistenza della configurazione:
+
+- **Panoramica**: valori FV, carichi, batterie, surplus, temperatura/UR,
+  modalita' Auto/Forza ON/Forza OFF/Diagnostica e stato del clima.
+- **Grafici**: energia e storico ambiente con due assi °C/UR e fascia
+  ON/OFF/ignoto; i grafici vengono ridisegnati all'apertura della scheda.
+- **Configurazione**: impostazioni Wi-Fi, MQTT, mappatura topic, soglie
+  energetiche/ambientali e IR, in gruppi espandibili; salva, riavvia,
+  esportazione redatta e cancellazione password MQTT invariati.
+- **Infrarossi**: conferma fisica, singoli test, ricezione/salvataggio RAW
+  e apprendimento consumi.
+- **Diagnostica**: eventi, topic MQTT, stato della rete e risorse.
+
+La navigazione utilizza un hash locale (`#overview`, `#charts`,
+`#settings`, `#infrared`, `#diagnostics`) ed e' utilizzabile con
+tastiera e su smartphone. Gli ID dei 37 controlli originali sono protetti
+da un test automatico: `node scripts/test_web_ui.mjs`.
+
+**Installazione su dispositivo gia' configurato:** le modifiche riguardano
+esclusivamente i file web in `data/`. Per applicarle serve aggiornare
+**LittleFS** con `pio run -e nodemcuv2 -t uploadfs --upload-port /dev/ttyUSB0`.
+**Importante:** questo comando sostituisce l'intero filesystem e cancella
+`config.json`, le credenziali Wi-Fi/MQTT e i codici IR RAW persistenti.
+Prima salvare l'esportazione redatta, annotare le password separatamente e
+mettere al sicuro le catture IR, se presenti; dopo il caricamento reinserire
+le impostazioni. Il normale upload del solo firmware non aggiorna i file web.
+Non e' stato modificato lo schema di configurazione ne' il firmware in questa
+revisione della sola interfaccia.
 
 ## Diagnostica seriale USB (versione 0.2.1)
 
