@@ -125,7 +125,7 @@ class EnergyManager {
     // Se il ciclo era iniziato soltanto per UR e questa e' rientrata,
     // arrestiamo dopo il minimo funzionamento. Un'autentica richiesta termica
     // prevale sempre e mantiene la vecchia isteresi tempOn/tempOff.
-    if(commandedOn && humidityOnlyRun_ && !humidityHeatDemand && !tempDemand) {
+    if(commandedOn && humidityOnlyRun_ && !humidityDemand_ && !tempDemand) {
       stable_ = false;
       low_ = false;
       if(elapsed(now,onAt_) >= c.minRunMs) {
