@@ -152,6 +152,29 @@ function drawEnvironmentChart(rows) {
     context.fillText(number(humidityLabel) + "%", width - right + 7, y + 3);
   }
 
+  // Soglie UR di riferimento: guide visive quando la funzione e' abilitata.
+  if(config.energy && config.energy.humidityAssist) {
+    const thresholdValues = [
+      {value: config.energy.humidityOn, text: "UR ON"},
+      {value: config.energy.humidityOff, text: "UR OFF"}
+    ];
+
+    for(const threshold of thresholdValues) {
+      if(!Number.isFinite(threshold.value)) {
+        continue;
+      }
+
+      context.strokeStyle = "#b6c3d5";
+      context.lineWidth = 1;
+      context.setLineDash([4, 4]);
+      context.beginPath();
+      context.moveTo(left, humidityY(threshold.value));
+      context.lineTo(width - right, humidityY(threshold.value));
+      context.stroke();
+      context.setLineDash([]);
+    }
+  }
+
   // Rappresentazione a intervalli: ON, OFF e stato sconosciuto.
   for(let index = 0; index < rows.length; index++) {
     const row = rows[index];
