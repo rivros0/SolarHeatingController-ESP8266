@@ -57,12 +57,13 @@ dal popup; la conferma non bypassa la validazione della release, del file
 BIN, del CSRF o della scheda. Il comportamento precedente della
 telemetria, dei sensori, dell'IR e delle automazioni non cambia.
 
-Il nuovo popup e' in `data/update.html`, quindi **la sola programmazione
-USB del firmware non lo aggiorna**: occorre aggiornare anche la pagina
-LittleFS. Il caricamento `pio run -t uploadfs` **cancella tutto il
-filesystem**, incluse Wi-Fi, password MQTT e acquisizioni IR. Prima
-salvare configurazioni/credenziali e proteggere i file RAW esistenti,
-oppure usare una distribuzione mirata che preservi i dati.
+Il nuovo popup viene letto da `data/update.html` **durante la
+compilazione** e incorporato nel firmware come risorsa PROGMEM. Di
+conseguenza basta il **solo upload USB del firmware 0.3.1** per aggiornare
+anche la pagina `/update`. Non serve `uploadfs`: le impostazioni Wi-Fi,
+MQTT e gli eventuali codici RAW su LittleFS rimangono intatti. La dashboard
+a schede continua invece a essere servita da LittleFS e richiede la
+relativa procedura separata.
 
 ## Ricevitore IR G / R / Y (GND / 3V3 / D6)
 
