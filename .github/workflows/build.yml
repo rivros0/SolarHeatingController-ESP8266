@@ -8,6 +8,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sh scripts/test.sh
+      - name: Verifica sintassi dashboard JavaScript
+        run: node --check data/app.js
   firmware:
     runs-on: ubuntu-latest
     strategy:

@@ -15,6 +15,12 @@ struct EnergyConfig {
   uint32_t stableMs = 600000, dropMs = 300000, restartMs = 600000;
   uint32_t minRunMs = 300000, staleMs = 30000;
   bool negativeCharge = false, negativeCurrentCharge = false;
+
+  // Supporto al comfort igrometrico (spento di default per retrocompatibilita').
+  // Non e' una funzione DRY: accende solo il riscaldamento HEAT, se sicuro.
+  bool humidityAssist = false;
+  float humidityOn = 60.0f;
+  float humidityOff = 55.0f;
 };
 struct EnergyData {
   Sample pv, load, battery, voltage, current, soc, importW, exportW;
@@ -24,16 +30,50 @@ enum class Mode { Auto, ForceOn, ForceOff, Diagnostic };
 struct Decision { Action action; const char* reason; float available; bool critical; };
 class EnergyManager {
   bool stable_ = false, low_ = false;
+  // Isteresi UR indipendente da quella termica. Serve a evitare oscillazioni.
+  bool humidityDemand_ = false;
+  // Se l'ultimo ON era dovuto unicamente all'UR, consentiamo uno stop
+  // quando l'umidita' e' rientrata, senza cambiare i cicli termici normali.
+  bool humidityOnlyRun_ = false;
+  bool pendingHumidityOnlyRun_ = false;
   uint32_t stableAt_ = 0, lowAt_ = 0, offAt_ = 0, onAt_ = 0;
  public:
-  void resetTimers() { stable_ = low_ = false; }
+  void resetTimers() {
+    stable_ = false;
+    low_ = false;
+    pendingHumidityOnlyRun_ = false;
+  }
   void changed(bool on, uint32_t now) {
-    if (on) onAt_ = now; else offAt_ = now;
+    if (on) {
+      onAt_ = now;
+      humidityOnlyRun_ = pendingHumidityOnlyRun_;
+    } else {
+      offAt_ = now;
+      humidityOnlyRun_ = false;
+    }
     resetTimers();
   }
+
+  bool humidityDemand() const { return humidityDemand_; }
+  bool humidityOnlyRun() const { return humidityOnlyRun_; }
   Decision evaluate(uint32_t now, const EnergyConfig& c, const EnergyData& d,
                     const Sample& temperature, Mode mode, bool commandedOn,
-                    bool mqttConnected, bool irReady, bool forceExpired) {
+                    bool mqttConnected, bool irReady, bool forceExpired,
+                    const Sample& humidity = Sample{}) {
+    // Se il sensore UR non e' aggiornato, non avviamo mai per umidita'.
+    // Il controllo termico tradizionale rimane invece disponibile.
+    bool humidityFresh = humidity.fresh(now,c.staleMs);
+    if(!c.humidityAssist || !humidityFresh) {
+      humidityDemand_ = false;
+    } else {
+      if(humidity.value >= c.humidityOn) {
+        humidityDemand_ = true;
+      }
+      if(humidity.value <= c.humidityOff) {
+        humidityDemand_ = false;
+      }
+    }
+
     const bool required = mqttConnected && d.pv.fresh(now,c.staleMs) &&
       d.load.fresh(now,c.staleMs) && d.battery.fresh(now,c.staleMs);
     const bool env = temperature.fresh(now,c.staleMs);
@@ -68,16 +108,53 @@ class EnergyManager {
       return {!commandedOn && irReady ? Action::On : Action::None,"Forza ON",available,false};
     }
     if (!irReady) { resetTimers(); return {Action::None,"IR discreti non verificati",available,false}; }
+
+    // La temperatura massima e' stata gia' applicata sopra. Il supporto UR
+    // puo' richiedere HEAT soltanto sotto quel limite, con margine di 0,5 C.
+    // HEAT riduce l'UR per riscaldamento, ma non rimuove l'acqua dall'aria.
+    const bool tempDemand = temperature.value < c.tempOn;
+    const bool humidityHeatDemand = c.humidityAssist && humidityDemand_ &&
+      temperature.value < c.tempOff - 0.5f;
+
+    // Una richiesta termica successiva assume la priorita' su un avvio da UR:
+    // resta quindi la normale isteresi termica fino a tempOff.
+    if(commandedOn && tempDemand) {
+      humidityOnlyRun_ = false;
+    }
+
+    // Se il ciclo era iniziato soltanto per UR e questa e' rientrata,
+    // arrestiamo dopo il minimo funzionamento. Un'autentica richiesta termica
+    // prevale sempre e mantiene la vecchia isteresi tempOn/tempOff.
+    if(commandedOn && humidityOnlyRun_ && !humidityDemand_ && !tempDemand) {
+      stable_ = false;
+      low_ = false;
+      if(elapsed(now,onAt_) >= c.minRunMs) {
+        return {Action::Off,"Umidita rientrata: fine supporto HEAT",available,false};
+      }
+      return {Action::None,"Umidita rientrata: attesa minimo funzionamento",available,false};
+    }
+
     const bool importing = d.importW.valid && (!d.importW.fresh(now,c.staleMs) || d.importW.value > 50);
     const bool exportingStale = d.exportW.valid && !d.exportW.fresh(now,c.staleMs);
     const bool enough = !importing && !exportingStale && battery >= c.reserveW &&
                        available >= (commandedOn ? 0 : c.climateW);
     if (!commandedOn) {
       low_ = false;
-      if (!enough || temperature.value >= c.tempOn) { stable_ = false; return {Action::None,"Attesa surplus/temperatura",available,false}; }
-      if (!stable_) { stable_ = true; stableAt_ = now; }
-      if (elapsed(now,stableAt_) >= c.stableMs && elapsed(now,offAt_) >= c.restartMs)
+      if (!enough || (!tempDemand && !humidityHeatDemand)) {
+        stable_ = false;
+        return {Action::None,"Attesa surplus/temperatura/umidita",available,false};
+      }
+      if (!stable_) {
+        stable_ = true;
+        stableAt_ = now;
+      }
+      if (elapsed(now,stableAt_) >= c.stableMs && elapsed(now,offAt_) >= c.restartMs) {
+        pendingHumidityOnlyRun_ = humidityHeatDemand && !tempDemand;
+        if(pendingHumidityOnlyRun_) {
+          return {Action::On,"Surplus stabile e UR alta: supporto HEAT",available,false};
+        }
         return {Action::On,"Surplus stabile e richiesta calore",available,false};
+      }
       return {Action::None,"Verifica stabilita e anti-riavvio",available,false};
     }
     stable_ = false;

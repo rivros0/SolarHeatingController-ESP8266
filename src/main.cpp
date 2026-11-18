@@ -12,7 +12,7 @@
 #include <time.h>
 #include "environment_manager.h"
 using namespace solar;
-static const char* VERSION="0.2.1";
+static const char* VERSION="0.3.0";
 ESP8266WebServer web(80);
 AsyncMqttClient mqtt;
 Adafruit_SHT31 sht;
@@ -38,7 +38,7 @@ struct Event { uint32_t at=0; String message; } events[16];
 uint8_t eventHead=0,eventCount=0;
 struct TopicSeen { String topic,value; uint32_t at=0; bool retained=false; } seen[12];
 uint8_t seenHead=0;
-struct History { uint32_t at; float pv,load,battery,t,h; uint8_t flags; } history[60];
+struct History { uint32_t at; float pv,load,battery,t,h; uint8_t flags; } history[120];
 uint8_t historyHead=0,historyCount=0;
 struct Learning {
   String stage="idle"; uint32_t at=0,startup=0; float sum=0,squares=0;
@@ -153,6 +153,30 @@ void serialPrintStatus(uint32_t now) {
   Serial.print(' ');
   serialPrintSample("umidita",environment.humidity,now,"%");
   Serial.println();
+
+  // Stato della nuova assistenza UR: informativo, non equivale a DRY.
+  Serial.print(F("[HUMIDITY] assist="));
+  if(cfg.energy.humidityAssist) {
+    Serial.print(F("ON"));
+  } else {
+    Serial.print(F("OFF"));
+  }
+  Serial.print(F(" soglia_on="));
+  Serial.print(cfg.energy.humidityOn,1);
+  Serial.print(F("% soglia_off="));
+  Serial.print(cfg.energy.humidityOff,1);
+  Serial.print(F("% richiesta="));
+  if(manager.humidityDemand()) {
+    Serial.print(F("SI"));
+  } else {
+    Serial.print(F("NO"));
+  }
+  Serial.print(F(" ciclo_solo_UR="));
+  if(manager.humidityOnlyRun()) {
+    Serial.println(F("SI"));
+  } else {
+    Serial.println(F("NO"));
+  }
 
   Serial.print(F("[ENERGY] "));
   serialPrintSample("PV",energy.pv,now,"W");
@@ -281,6 +305,9 @@ void stateRoute() {
   o["heap"]=ESP.getFreeHeap(); o["maxBlock"]=ESP.getMaxFreeBlockSize();
   o["otaSpace"]=ESP.getFreeSketchSpace(); o["storage"]=storageReady;
   o["resetReason"]=ESP.getResetReason(); o["lastMqttAgeMs"]=elapsed(now,lastMqttAt);
+  o["humidityAssist"]=cfg.energy.humidityAssist;
+  o["humidityDemand"]=manager.humidityDemand();
+  o["humidityOnlyRun"]=manager.humidityOnlyRun();
   o["mode"]=mode==Mode::Auto?"auto":mode==Mode::ForceOn?"force_on":mode==Mode::ForceOff?"force_off":"diagnostic";
   o["commanded"]=infrared.known?(infrared.on?"on":"off"):"unknown";
   o["estimated"]=detector.estimated; o["confidence"]=detector.confidence;
@@ -440,7 +467,7 @@ void setupRoutes() {
     if(!authenticated()) return;
     web.setContentLength(CONTENT_LENGTH_UNKNOWN); web.sendHeader("Cache-Control","no-store"); web.send(200,"application/json",""); web.sendContent("[");
     for(int i=0;i<historyCount;i++) {
-      auto& h=history[(historyHead+60-historyCount+i)%60]; StaticJsonDocument<256> doc;
+      auto& h=history[(historyHead+120-historyCount+i)%120]; StaticJsonDocument<256> doc;
       doc["s"]=h.at;
       if(h.flags&1) { doc["pv"]=h.pv; doc["load"]=h.load; doc["battery"]=h.battery; }
       else { doc["pv"]=nullptr; doc["load"]=nullptr; doc["battery"]=nullptr; }
@@ -686,8 +713,10 @@ void loop() {
     bool gridOk=(!cfg.topics[6].length()||energy.importW.fresh(now,cfg.energy.staleMs)) &&
                 (!cfg.topics[7].length()||energy.exportW.fresh(now,cfg.energy.staleMs));
     bool ready=infrared.automaticReady()&&infrared.known&&!rebootNeeded;
+    // UR SHT31: campione indipendente usato solo quando l'assistenza e' attiva.
+    // Le decisioni HEAT rimangono vincolate a sicurezza, surplus e limiti termici.
     auto d=manager.evaluate(now,cfg.energy,energy,environment.temperature,mode,infrared.known&&infrared.on,
-                            mqtt.connected()&&gridOk,ready,expired);
+                            mqtt.connected()&&gridOk,ready,expired,environment.humidity);
     availableW=d.available;
     if(!infrared.known) reason="Stato sconosciuto: confermare lo stato fisico in diagnostica";
     else reason=d.reason;
@@ -705,7 +734,7 @@ void loop() {
     bool t=environment.temperature.fresh(now,cfg.energy.staleMs);
     history[historyHead]={now/1000,energy.pv.value,energy.load.value,energy.battery.value*(cfg.energy.negativeCharge?-1:1),environment.temperature.value,environment.humidity.value,
       uint8_t((e?1:0)|(t?2:0)|(infrared.on?4:0)|(infrared.known?8:0))};
-    historyHead=(historyHead+1)%60; if(historyCount<60) historyCount++;
+    historyHead=(historyHead+1)%120; if(historyCount<120) historyCount++;
   }
   yield();
 }

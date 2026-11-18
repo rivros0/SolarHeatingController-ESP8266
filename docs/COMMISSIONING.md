@@ -16,3 +16,14 @@ Queste prove richiedono l'impianto reale. Non sono state eseguite durante lo svi
 12. **OTA:** usare [OTA.md](OTA.md), verificare autenticazione fallita, file errato, immagine troppo grande, upload interrotto, upload valido, mantenimento configurazione e recupero USB. Le prove di interruzione alimentazione vanno svolte con possibilità di recupero fisico e climatizzatore gestibile indipendentemente.
 
 Diagnostica sospende l'automazione energetica ordinaria. I test di comandi toggle richiedono sorveglianza dell'operatore: un arresto automatico non può garantire OFF con un toggle e stato incerto. Non lasciare un test toggle acceso incustodito. Le modalità Automatico e Forza ON lo impediscono richiedendo codici discreti.
+
+## Prova supplementare: assistenza umidita' (v0.3.0)
+
+1. Verificare che il sensore SHT31 fornisca **entrambi** i campioni validi.
+2. Lasciare `humidityAssist=false` e verificare che il controllo termico non cambi anche con UR alta.
+3. Abilitare l'assistenza con `humidityOn=60`, `humidityOff=55`, senza abilitare l'automazione prima della verifica di tutti i requisiti IR/AGM/MQTT.
+4. Simulare/riscontrare UR>=60% e temperatura fra `tempOn` e `tempOff-0,5`: l'HEAT puo' partire soltanto dopo `stableMs`, `restartMs`, riserva energetica valida, ON/OFF discreti verificati e stato fisico confermato.
+5. Verificare che UR<=55% termini un ciclo **iniziato solo per umidita'** rispettando `minRunMs`; se subentra `T<tempOn`, prevale l'isteresi termica normale.
+6. Verificare il veto assoluto a `T>=tempOff`, la perdita del sensore, l'assenza del surplus e i blocchi IR. Confrontare grafico °C/%/stato ON-OFF con il clima osservato: la fascia di stato rappresenta comando/conferma, non il feedback hardware.
+7. Il riscaldamento riduce l'UR senza rimuovere acqua. Se l'umidita' persiste sopra 60%, valutare ventilazione o un dispositivo/mode DRY dedicato.
+
