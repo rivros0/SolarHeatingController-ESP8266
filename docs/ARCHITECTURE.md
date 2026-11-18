@@ -26,7 +26,7 @@ La modalità preferita è salvata solo su azione esplicita dell'utente, in un fi
 
 - Firmware e librerie sono limitati ai protocolli IR selezionati dai flag PlatformIO (KELON, WHIRLPOOL, decoder KELON168, RAW/hash). KELON168 è identificabile e riproducibile tramite RAW, non sintetizzato da IRac 2.8.6.
 - Tre buffer RAW da 512 uint16 (3072 byte); ricevitore opzionale da 1024 entry allocato solo se abilitato. Non vengono accettate catture in overflow.
-- Storico 60 campioni (~1,7 KB), eventi 16×160 caratteri massimi, 12 topic diagnostici di massimo 128+80 caratteri.
+- Storico 120 campioni (~3,4 KB), eventi 16×160 caratteri massimi, 12 topic diagnostici di massimo 128+80 caratteri.
 - JSON configurazione su heap fino a 6144 byte di capacità; export cattura IR fino a 9216 byte, subordinato a un blocco libero di almeno 11000 byte. Storico e diagnostica vengono inviati una riga alla volta, non costruiti interamente su heap. Gli slot IR sono binari con lunghezza e checksum, senza una seconda rappresentazione JSON allocata in RAM. Gli asset LittleFS vengono letti in streaming.
 - Nessuna scrittura flash a ogni misura, evento, messaggio MQTT o iterazione. Configurazione, modalità e codici sono salvati soltanto in seguito a richieste esplicite.
 - Monitorare heap libero e blocco massimo in `/api/state`, soprattutto con ricevitore e apprendimento. La misura di RAM al link è statica e non comprende heap allocato durante l'esecuzione.
