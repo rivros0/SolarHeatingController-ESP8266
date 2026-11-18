@@ -9,6 +9,7 @@
 #include "config.h"
 #include "ir_manager.h"
 #include "github_ota.h"
+#include "generated_update_page.h"
 #include <time.h>
 #include "environment_manager.h"
 using namespace solar;
@@ -584,8 +585,10 @@ void setupRoutes() {
 
   web.on("/update",HTTP_GET,[] {
     if(!authenticated()) return;
-    File f=LittleFS.open("/update.html","r");
-    if(f) { web.streamFile(f,"text/html"); f.close(); } else web.send(503,"text/plain","Caricare LittleFS via USB (uploadfs)");
+    // La pagina OTA e' incorporata nel firmware: un aggiornamento via USB
+    // installa automaticamente il popup senza alterare config e codici LittleFS.
+    web.sendHeader("Cache-Control","no-store");
+    web.send_P(200,PSTR("text/html; charset=utf-8"),UPDATE_PAGE_HTML);
   });
   web.on("/update",HTTP_POST,[] {
     if(!mutation()) return;
