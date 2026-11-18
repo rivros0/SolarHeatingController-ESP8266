@@ -1,14 +1,14 @@
 {
-  "version": "0.2.0",
+  "version": "0.2.1",
   "layout": "4m1m",
   "boards": {
     "nodemcuv2": {
-      "size": 550784,
-      "sha256": "6339a06ad78b7446dfb5ff7d9a9829d24efaac3e1de303e4501c2085b426d306"
+      "size": 555120,
+      "sha256": "54138c856ec117018d83d068b7ae010969bd6042148c664269de3cd6de804c2c"
     },
     "d1_mini": {
-      "size": 550784,
-      "sha256": "f5a180832b5ed060a6acf049d0dbf7f146b2b5f5b354a933bf949d3b592bce22"
+      "size": 555120,
+      "sha256": "51601cb2241196d8621714ee8a4110efb9278d3916a56320beb23b307c61d0e9"
     }
   }
 }
