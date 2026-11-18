@@ -12,7 +12,7 @@
 #include <time.h>
 #include "environment_manager.h"
 using namespace solar;
-static const char* VERSION="0.2.0";
+static const char* VERSION="0.2.1";
 ESP8266WebServer web(80);
 AsyncMqttClient mqtt;
 Adafruit_SHT31 sht;
@@ -27,6 +27,13 @@ float availableW=0;
 bool sensorPresent=false,rebootNeeded=false,updateActive=false,updateOk=false,recoveryAP=false;
 uint32_t forceAt=0,rebootAt=0,lastSensor=0,lastSecond=0,lastHistory=0,lastMqttAttempt=0;
 uint32_t lastMqttAt=0,retainedIgnored=0,mqttRejected=0;
+
+// Diagnostica seriale: controllo non bloccante e riepilogo ogni 30 secondi.
+static const uint32_t SERIAL_POLL_MS = 1000UL;
+static const uint32_t SERIAL_STATUS_MS = 30000UL;
+uint32_t serialLastPollAt=0,serialLastStatusAt=0;
+bool serialNetworkStateKnown=false,serialLastMqttConnected=false;
+int serialLastWiFiStatus=-1;
 struct Event { uint32_t at=0; String message; } events[16];
 uint8_t eventHead=0,eventCount=0;
 struct TopicSeen { String topic,value; uint32_t at=0; bool retained=false; } seen[12];
@@ -43,9 +50,172 @@ Sample* metric(int i) {
     case 3:return &energy.voltage;case 4:return &energy.current;case 5:return &energy.soc;
     case 6:return &energy.importW;case 7:return &energy.exportW;default:return nullptr;}
 }
+// ============================================================================
+// DIAGNOSTICA SERIALE
+// I messaggi ROM precedenti a setup() sono a 74880 baud; il firmware usa 115200.
+// Nessuna password Wi-Fi, amministratore o MQTT viene stampata nei riepiloghi.
+// ============================================================================
+const char* serialWiFiStatusName(int status) {
+  switch(status) {
+    case WL_CONNECTED: return "CONNECTED";
+    case WL_NO_SSID_AVAIL: return "NO_SSID";
+    case WL_CONNECT_FAILED: return "CONNECT_FAILED";
+    case WL_CONNECTION_LOST: return "CONNECTION_LOST";
+    case WL_DISCONNECTED: return "DISCONNECTED";
+    case WL_IDLE_STATUS: return "IDLE";
+    default: return "OTHER";
+  }
+}
+
+const char* serialModeName() {
+  switch(mode) {
+    case Mode::Auto: return "AUTO";
+    case Mode::ForceOn: return "FORCE_ON";
+    case Mode::ForceOff: return "FORCE_OFF";
+    case Mode::Diagnostic: return "DIAGNOSTIC";
+    default: return "UNKNOWN";
+  }
+}
+
+void serialPrintSample(const char* label,const Sample& sample,uint32_t now,const char* unit) {
+  Serial.print(label);
+  Serial.print('=');
+  if(sample.fresh(now,cfg.energy.staleMs)) {
+    Serial.print(sample.value,1);
+    Serial.print(unit);
+  } else {
+    Serial.print(F("n/d"));
+  }
+}
+
+void serialPrintStartup() {
+  Serial.begin(115200);
+  Serial.println();
+  Serial.println(F("======================================================"));
+  Serial.println(F(" SOLAR HEATING CONTROLLER - DIAGNOSTICA SERIALE"));
+  Serial.println(F("======================================================"));
+  Serial.print(F("[BOOT] Versione: ")); Serial.println(VERSION);
+  Serial.print(F("[BOOT] Reset: ")); Serial.println(ESP.getResetReason());
+  Serial.print(F("[BOOT] Dettaglio reset: ")); Serial.println(ESP.getResetInfo());
+  Serial.print(F("[BOOT] Flash rilevata: "));
+  Serial.print(ESP.getFlashChipRealSize()/1024UL); Serial.println(F(" KiB"));
+  Serial.print(F("[BOOT] Firmware: "));
+  Serial.print(ESP.getSketchSize()); Serial.println(F(" byte"));
+  Serial.print(F("[BOOT] Heap disponibile: "));
+  Serial.print(ESP.getFreeHeap()); Serial.println(F(" byte"));
+  Serial.println(F("[BOOT] Caricamento configurazione LittleFS..."));
+  Serial.flush();
+}
+
+void serialPrintStatus(uint32_t now) {
+  Serial.print(F("[STATUS] uptime=")); Serial.print(now/1000UL);
+  Serial.print(F("s heap=")); Serial.print(ESP.getFreeHeap());
+  Serial.print(F("B fs="));
+  if(storageReady) {
+    Serial.print(F("OK"));
+  } else {
+    Serial.print(F("KO"));
+  }
+  Serial.print(F(" config="));
+  if(configReady) {
+    Serial.print(F("OK"));
+  } else {
+    Serial.print(F("KO"));
+  }
+  Serial.print(F(" mode=")); Serial.println(serialModeName());
+
+  Serial.print(F("[WIFI] stato="));
+  Serial.print(serialWiFiStatusName(WiFi.status()));
+  if(WiFi.status()==WL_CONNECTED) {
+    Serial.print(F(" ip=")); Serial.print(WiFi.localIP());
+    Serial.print(F(" rssi=")); Serial.print(WiFi.RSSI());
+    Serial.print(F("dBm"));
+  }
+  if(recoveryAP) {
+    Serial.print(F(" recovery_ap=")); Serial.print(WiFi.softAPIP());
+  }
+  Serial.println();
+
+  Serial.print(F("[MQTT] "));
+  if(mqtt.connected()) {
+    Serial.println(F("connesso"));
+  } else {
+    Serial.println(F("disconnesso"));
+  }
+
+  Serial.print(F("[SENSOR] SHT31="));
+  if(sensorPresent) {
+    Serial.print(F("rilevato "));
+  } else {
+    Serial.print(F("non rilevato "));
+  }
+  serialPrintSample("temperatura",environment.temperature,now,"C");
+  Serial.print(' ');
+  serialPrintSample("umidita",environment.humidity,now,"%");
+  Serial.println();
+
+  Serial.print(F("[ENERGY] "));
+  serialPrintSample("PV",energy.pv,now,"W");
+  Serial.print(' ');
+  serialPrintSample("carichi",energy.load,now,"W");
+  Serial.print(' ');
+  serialPrintSample("batteria_raw",energy.battery,now,"W");
+  Serial.print(' ');
+  serialPrintSample("V_batteria",energy.voltage,now,"V");
+  Serial.println();
+
+  Serial.print(F("[IR] stato fisico="));
+  if(!infrared.known) {
+    Serial.println(F("sconosciuto"));
+  } else if(infrared.on) {
+    Serial.println(F("acceso (ultimo stato noto)"));
+  } else {
+    Serial.println(F("spento (ultimo stato noto)"));
+  }
+}
+
+void serialDiagnosticsTick(uint32_t now) {
+  // Una lettura al secondo evita di appesantire il controllo energetico.
+  if(now-serialLastPollAt<SERIAL_POLL_MS) return;
+  serialLastPollAt=now;
+
+  int wifiStatus=WiFi.status();
+  bool mqttConnected=mqtt.connected();
+  if(!serialNetworkStateKnown || wifiStatus!=serialLastWiFiStatus) {
+    Serial.print(F("[WIFI] Cambio stato: "));
+    Serial.println(serialWiFiStatusName(wifiStatus));
+    if(wifiStatus==WL_CONNECTED) {
+      Serial.print(F("[WIFI] IP locale: "));
+      Serial.println(WiFi.localIP());
+    }
+    serialLastWiFiStatus=wifiStatus;
+  }
+  if(!serialNetworkStateKnown || mqttConnected!=serialLastMqttConnected) {
+    Serial.print(F("[MQTT] Cambio stato: "));
+    if(mqttConnected) {
+      Serial.println(F("connesso"));
+    } else {
+      Serial.println(F("disconnesso"));
+    }
+    serialLastMqttConnected=mqttConnected;
+  }
+  serialNetworkStateKnown=true;
+
+  if(now-serialLastStatusAt>=SERIAL_STATUS_MS) {
+    serialLastStatusAt=now;
+    serialPrintStatus(now);
+  }
+}
+
 void logEvent(const String& text) {
+  // Manteniamo il registro circolare della dashboard e duplichiamo sulla USB.
   events[eventHead]={millis(),text.substring(0,160)};
-  eventHead=(eventHead+1)%16; if(eventCount<16) eventCount++;
+  eventHead=(eventHead+1)%16;
+  if(eventCount<16) eventCount++;
+  Serial.print(F("[EVENT +"));
+  Serial.print(millis()/1000UL);
+  Serial.print(F("s] "));
+  Serial.println(text);
 }
 bool authenticated() {
   if(!configReady) { web.send(503,"text/plain","Configurazione non disponibile: recupero USB necessario"); return false; }
@@ -382,14 +552,42 @@ void setupRoutes() {
   web.begin();
 }
 void setup() {
-  Serial.begin(115200); Serial.println(); loadConfig();
-  if(!configReady) { Serial.println(F("STOP sicuro: LittleFS/config non disponibili. Flash USB, nessun comando IR.")); return; }
+  serialPrintStartup();
+  loadConfig();
+  Serial.print(F("[FS] LittleFS: "));
+  if(storageReady) {
+    Serial.println(F("montato"));
+  } else {
+    Serial.println(F("ERRORE montaggio"));
+  }
+  Serial.print(F("[CONFIG] Configurazione: "));
+  if(configReady) {
+    Serial.println(F("valida"));
+  } else {
+    Serial.println(F("NON DISPONIBILE"));
+  }
+  if(!configReady) {
+    Serial.println(F("[ERROR] STOP sicuro: LittleFS/config non disponibili; nessun comando IR."));
+    serialPrintStatus(millis());
+    serialLastStatusAt=millis();
+    Serial.flush();
+    return;
+  }
   char token[25]; snprintf(token,sizeof(token),"%08lx%08lx%08lx",os_random(),os_random(),os_random()); csrf=token;
   File savedMode=LittleFS.open("/mode.txt","r");
   if(savedMode && savedMode.size()<32) lastRequestedMode=savedMode.readString();
   if(savedMode) savedMode.close();
-  Wire.begin(4,5); sensorPresent=sht.begin(0x44);
+  Serial.println(F("[INIT] Sensore I2C SHT31..."));
+  Wire.begin(4,5);
+  sensorPresent=sht.begin(0x44);
+  if(sensorPresent) {
+    Serial.println(F("[SENSOR] SHT31 rilevato"));
+  } else {
+    Serial.println(F("[SENSOR] SHT31 non rilevato; automazione protetta"));
+  }
+  Serial.println(F("[INIT] Trasmettitore/ricevitore IR..."));
   infrared.begin();
+  Serial.println(F("[INIT] Interfaccia Wi-Fi..."));
   WiFi.persistent(false); WiFi.mode(WIFI_AP_STA); WiFi.setAutoReconnect(true);
   if(cfg.ssid.length()) {
     // Imposta l'eventuale IP statico PRIMA della connessione alla rete Wi-Fi.
@@ -414,12 +612,21 @@ void setup() {
         return;
       }
     }
+    Serial.println(F("[WIFI] Connessione alla rete configurata richiesta"));
     WiFi.begin(cfg.ssid.c_str(),cfg.wifiPassword.c_str());
     // NTP: necessario alla verifica temporale dei certificati HTTPS.
     configTime(0,0,"pool.ntp.org","time.google.com");
   }
   // Recovery AP is available on first setup, and after 30s without station Wi-Fi.
-  if(!cfg.ssid.length()) recoveryAP=WiFi.softAP(("SolarHeat-"+String(ESP.getChipId(),HEX)).c_str(),cfg.adminPassword.c_str());
+  if(!cfg.ssid.length()) {
+    recoveryAP=WiFi.softAP(("SolarHeat-"+String(ESP.getChipId(),HEX)).c_str(),cfg.adminPassword.c_str());
+    if(recoveryAP) {
+      Serial.print(F("[WIFI] AP iniziale attivo: "));
+      Serial.println(WiFi.softAPIP());
+    } else {
+      Serial.println(F("[WIFI][ERROR] AP iniziale non disponibile"));
+    }
+  }
   mqtt.setServer(cfg.mqttHost.c_str(),cfg.mqttPort); mqtt.setKeepAlive(cfg.mqttKeepalive);
   if(cfg.mqttUser.length()) mqtt.setCredentials(cfg.mqttUser.c_str(),cfg.mqttPassword.c_str());
   mqtt.onConnect([](bool) {
@@ -429,16 +636,35 @@ void setup() {
   });
   mqtt.onDisconnect([](AsyncMqttClientDisconnectReason) { clearTelemetry(); logEvent("MQTT disconnesso"); });
   mqtt.onMessage(receiveMqtt);
-  setupRoutes(); logEvent(String("Firmware ")+VERSION+" pronto; stato fisico sconosciuto");
+  setupRoutes();
+  logEvent(String("Firmware ")+VERSION+" pronto; stato fisico sconosciuto");
+  serialPrintStatus(millis());
+  serialLastStatusAt=millis();
+  Serial.println(F("[BOOT] Setup terminato; monitoraggio periodico attivo"));
+  Serial.flush();
 }
 void loop() {
-  if(!configReady) { delay(20); return; }
-  uint32_t now=millis(); web.handleClient(); infrared.poll();
+  uint32_t now=millis();
+  serialDiagnosticsTick(now);
+  if(!configReady) {
+    delay(20);
+    return;
+  }
+  web.handleClient();
+  infrared.poll();
   if(rebootAt && int32_t(now-rebootAt)>=0) ESP.restart();
   if(updateActive) { yield(); return; }
-  if(now>30000 && WiFi.status()!=WL_CONNECTED && !recoveryAP)
+  if(now>30000 && WiFi.status()!=WL_CONNECTED && !recoveryAP) {
     recoveryAP=WiFi.softAP(("SolarHeat-"+String(ESP.getChipId(),HEX)).c_str(),cfg.adminPassword.c_str());
-  if(WiFi.status()==WL_CONNECTED && recoveryAP) { WiFi.softAPdisconnect(true); recoveryAP=false; }
+    if(recoveryAP) {
+      logEvent("AP di recupero attivato: 192.168.4.1");
+    }
+  }
+  if(WiFi.status()==WL_CONNECTED && recoveryAP) {
+    WiFi.softAPdisconnect(true);
+    recoveryAP=false;
+    logEvent("AP di recupero disattivato: Wi-Fi connesso");
+  }
   if(WiFi.status()==WL_CONNECTED && !mqtt.connected() && cfg.mqttHost.length() && elapsed(now,lastMqttAttempt)>=10000) {
     lastMqttAttempt=now; mqtt.connect();
   }

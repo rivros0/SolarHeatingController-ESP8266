@@ -2,7 +2,7 @@
 
 Controller locale per usare il surplus fotovoltaico nel riscaldamento di un climatizzatore Hisense, mantenendo priorità ai carichi domestici e alla ricarica batterie. Firmware Arduino per **NodeMCU ESP8266 e Wemos D1 Mini da 4 MB**, dashboard HTML/CSS/JS su LittleFS, SolarAssistant via MQTT, SHT31 e IRremoteESP8266. Nessun servizio cloud necessario.
 
-**Versione 0.2.0 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
+**Versione 0.2.1 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
 
 ## Funzioni
 
@@ -27,8 +27,8 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 
    ```sh
    pio run -e nodemcuv2
-   pio run -e nodemcuv2 -t upload
    pio run -e nodemcuv2 -t uploadfs
+   pio run -e nodemcuv2 -t upload
    pio device monitor -b 115200
    ```
 
@@ -41,6 +41,24 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 9. Per verificare nuovi firmware direttamente da GitHub apri `/update`, consulta il canale firmware-stable e scegli l'installazione. Vedere [OTA.md](docs/OTA.md).
 
 Al riavvio il controller entra sempre in **Forza OFF con stato fisico sconosciuto**. Non invia un toggle e non presume che il climatizzatore sia spento. Se dispone già di codici discreti verificati, Forza OFF o una protezione possono inviare un unico OFF preventivo anche da stato sconosciuto. L'ultima modalità richiesta è salvata a fini diagnostici; la ripartenza automatica dopo un reset richiede una nuova conferma fisica o un comando OFF discreto. Questa scelta evita avvii e inversioni inattesi dopo OTA o interruzioni di alimentazione.
+
+## Diagnostica seriale USB (versione 0.2.1)
+
+La porta seriale del firmware utilizza **115200 baud**. Con la NodeMCU collegata via USB:
+
+```sh
+pio device monitor --port /dev/ttyUSB0 --baud 115200 --rts 0 --dtr 0 --filter time
+```
+
+- **A ogni avvio** il firmware stampa un banner `[BOOT]` con versione, motivo e dettaglio del reset, memoria flash, dimensione dello sketch e RAM libera. I messaggi `[INIT]`, `[FS]`, `[CONFIG]`, `[SENSOR]` e `[WIFI]` mostrano l'avanzamento dell'inizializzazione anche quando esiste gia' `/config.json`.
+- Gli eventi registrati nella dashboard sono riportati anche sulla USB con prefisso `[EVENT +Ns]`: questo include le variazioni di modalita', gli invii IR, gli eventi MQTT e l'esito OTA.
+- Ogni **30 secondi** appare un riepilogo `[STATUS]`, `[WIFI]`, `[MQTT]`, `[SENSOR]`, `[ENERGY]`, `[IR]`, con uptime, RAM libera, stato rete, IP/RSSI se connesso, temperatura/umidita' e misure energetiche valide. I campioni assenti o scaduti sono indicati come `n/d`. La potenza `batteria_raw` mantiene il segno originale ricevuto via MQTT.
+- Le transizioni Wi-Fi e MQTT producono un messaggio immediato, controllato a intervalli di un secondo. Il riepilogo continua anche quando la configurazione non e' disponibile.
+- **Non** vengono ripetute le credenziali nei riepiloghi. Solo il **primo avvio con password generata** stampa la password iniziale, come gia' previsto dalla procedura di configurazione: conservare il log seriale in modo riservato.
+
+**Attenzione:** il bootloader ROM dell'ESP8266 trasmette brevemente a **74880 baud**; sono quindi normali alcuni caratteri incomprensibili *prima* del banner `[BOOT]` leggibile a 115200 baud. Se il banner ricompare continuamente, confrontare il campo `Reset` e verificare alimentazione, RST e collegamenti esterni.
+
+Per aggiornare il firmware dalla USB dopo la prima installazione e' sufficiente `pio run -e nodemcuv2 -t upload --upload-port /dev/ttyUSB0`. **Non ripetere `uploadfs`**: sostituisce il filesystem e cancella credenziali, configurazioni e codici IR acquisiti. La diagnostica seriale non modifica le decisioni energetiche o la sicurezza delle trasmissioni IR.
 
 ## Logica energetica
 
