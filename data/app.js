@@ -3,6 +3,8 @@ let csrf="",config={},state={},diagnostics={},pollCount=0;
 
 // Ultimo storico ricevuto: permette il ridisegno immediato al cambio scheda.
 let historyCache = [];
+// Ancora browser/ESP: la scheda non dispone di timestamp assoluti storici.
+let historyTimeAnchor = null;
 const TAB_IDS = ["overview", "charts", "settings", "infrared", "diagnostics"];
 const $=id=>document.getElementById(id);
 const number=(v,d=0)=>v===null||v===undefined||!Number.isFinite(v)?"—":v.toLocaleString("it-IT",{maximumFractionDigits:d});
@@ -145,7 +147,10 @@ function initializeTabs() {
   activateTab(tabIdFromHash(), false, false);
 }
 
-async function refresh(){try{state=await api("/api/state");csrf=state.csrf;$("connection").textContent=state.wifi?(state.mqtt?"Wi-Fi + MQTT connessi":"Wi-Fi · MQTT assente"):"Access point locale";
+async function refresh(){try{state=await api("/api/state");csrf=state.csrf;
+// Associa i secondi dall'avvio dell'ESP8266 all'orario del browser.
+// Non richiede RTC, NTP o modifiche al firmware.
+historyTimeAnchor = {wallMs:Date.now(),uptimeSec:Number(state.uptime)};$("connection").textContent=state.wifi?(state.mqtt?"Wi-Fi + MQTT connessi":"Wi-Fi · MQTT assente"):"Access point locale";
 for(const k of["pv","load"])$(k).textContent=number(state.energy[k].value);
 const b=state.energy.battery.value;$("battery").textContent=number(b===null?null:b*(config.energy?.negativeCharge?-1:1));
 $("batteryDetail").textContent=`W · ${number(state.energy.voltage.value,1)} V · SOC ${number(state.energy.soc.value)} %`;
@@ -180,14 +185,225 @@ if(pollCount++%5===0) {
   renderHistoryCharts();
 }
 }catch(e){notice("Connessione o dati non disponibili: "+e.message);}finally{setTimeout(refresh,3000);}}
-function draw(id,rows,series,unit){const canvas=$(id),r=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;canvas.width=r.width*dpr;canvas.height=r.height*dpr;const c=canvas.getContext("2d");c.scale(dpr,dpr);const w=r.width,h=r.height,p=35;
-const values=rows.flatMap(row=>series.map(([k])=>row[k])).filter(Number.isFinite),lo=Math.min(0,...values),hi=Math.max(1,...values),range=hi-lo;
-c.font="10px system-ui";c.fillStyle="#637872";c.fillText(`${number(hi)} ${unit}`,0,12);c.fillText(number(lo),0,h-14);
-for(let j=0;j<3;j++){const y=18+j*(h-40)/2;c.strokeStyle="#e4e9e1";c.beginPath();c.moveTo(p,y);c.lineTo(w,y);c.stroke();}
-if(rows.length<2){c.fillText("In attesa di campioni…",p,55);return;}const first=rows[0].s,last=rows[rows.length-1].s,dt=Math.max(1,last-first);const x=row=>p+(row.s-first)/dt*(w-p-5),y=v=>18+(hi-v)/range*(h-40);
-for(const[k,color]of series){c.strokeStyle=color;c.lineWidth=1.8;c.beginPath();let active=false;for(const row of rows){if(!Number.isFinite(row[k])){active=false;continue;}if(!active)c.moveTo(x(row),y(row[k]));else c.lineTo(x(row),y(row[k]));active=true;}c.stroke();}
-for(let i=1;i<rows.length;i++)if(rows[i].known&&rows[i-1].known&&rows[i].on!==rows[i-1].on){c.strokeStyle=rows[i].on?"#21634f":"#bd6d42";c.setLineDash([3,3]);c.beginPath();c.moveTo(x(rows[i]),18);c.lineTo(x(rows[i]),h-22);c.stroke();c.setLineDash([]);}
-c.fillStyle="#637872";c.fillText(`ultimi ${number(dt/60,1)} min · secondi dall’avvio`,p,h-2);}
+// ============================================================================
+// ASSE X TEMPORALE COMUNE AI DUE GRAFICI
+//
+// L'ESP8266 salva gli istanti dei campioni come secondi dal boot ("s").
+// Li convertiamo in orario locale usando una coppia uptime/orologio del
+// browser ottenuta al refresh. Gli orari sono indicativi e dipendono
+// dall'orologio del dispositivo che visualizza la pagina.
+// ============================================================================
+function axisTimestampMs(sampleSeconds) {
+  if(!historyTimeAnchor || !Number.isFinite(sampleSeconds)) {
+    return null;
+  }
+
+  const uptimeSeconds = historyTimeAnchor.uptimeSec;
+  const wallClockMs = historyTimeAnchor.wallMs;
+  if(!Number.isFinite(uptimeSeconds) || !Number.isFinite(wallClockMs)) {
+    return null;
+  }
+
+  return wallClockMs - (uptimeSeconds - sampleSeconds) * 1000;
+}
+
+function formatChartTime(sampleSeconds, rangeSeconds) {
+  const timestamp = axisTimestampMs(sampleSeconds);
+
+  if(timestamp === null) {
+    // Ripiego leggibile se non e' ancora arrivata la prima risposta /api/state.
+    const seconds = Math.max(0, Math.floor(sampleSeconds));
+    const hours = String(Math.floor(seconds / 3600)).padStart(2, "0");
+    const minutes = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
+    const remainingSeconds = String(seconds % 60).padStart(2, "0");
+    return "T+" + hours + ":" + minutes + ":" + remainingSeconds;
+  }
+
+  const date = new Date(timestamp);
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+
+  if(rangeSeconds < 300) {
+    const second = String(date.getSeconds()).padStart(2, "0");
+    return hour + ":" + minute + ":" + second;
+  }
+
+  if(rangeSeconds >= 86400) {
+    const day = String(date.getDate()).padStart(2, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    return day + "/" + month + " " + hour + ":" + minute;
+  }
+
+  return hour + ":" + minute;
+}
+
+function drawChartTimeAxis(context, rows, left, right, top, bottom, labelY) {
+  if(rows.length === 0 || right <= left) {
+    return;
+  }
+
+  const firstSeconds = rows[0].s;
+  const lastSeconds = rows[rows.length - 1].s;
+  if(!Number.isFinite(firstSeconds) || !Number.isFinite(lastSeconds)) {
+    return;
+  }
+
+  const rangeSeconds = Math.max(0, lastSeconds - firstSeconds);
+  const axisWidth = right - left;
+  let tickCount = 5;
+
+  // Riduce il numero di etichette sui display piccoli per evitare
+  // sovrapposizioni, conservando sempre l'inizio e la fine dell'intervallo.
+  if(axisWidth < 260) {
+    tickCount = 2;
+  } else if(axisWidth < 550) {
+    tickCount = 3;
+  }
+  if(rangeSeconds === 0) {
+    tickCount = 1;
+  }
+
+  context.save();
+  context.font = "11px system-ui";
+  context.fillStyle = "#637872";
+  context.strokeStyle = "#e4e9e1";
+  context.lineWidth = 1;
+  context.textBaseline = "middle";
+
+  for(let index = 0; index < tickCount; index++) {
+    let fraction = 0.5;
+    if(tickCount > 1) {
+      fraction = index / (tickCount - 1);
+    }
+
+    const x = left + fraction * axisWidth;
+    const seconds = firstSeconds + fraction * rangeSeconds;
+
+    // Griglia verticale, tacche e orari si riferiscono alla medesima
+    // posizione temporale delle curve.
+    context.beginPath();
+    context.moveTo(x, top);
+    context.lineTo(x, bottom + 5);
+    context.stroke();
+
+    if(index === 0 && tickCount > 1) {
+      context.textAlign = "left";
+    } else if(index === tickCount - 1 && tickCount > 1) {
+      context.textAlign = "right";
+    } else {
+      context.textAlign = "center";
+    }
+    context.fillText(formatChartTime(seconds, rangeSeconds), x, labelY);
+  }
+
+  context.restore();
+}
+
+// ============================================================================
+// GRAFICO ENERGETICO - linee, transizioni IR e asse X con orario
+// ============================================================================
+function draw(id, rows, series, unit) {
+  const canvas = $(id);
+  const rectangle = canvas.getBoundingClientRect();
+  const pixelRatio = window.devicePixelRatio || 1;
+  const width = rectangle.width;
+  const height = rectangle.height;
+
+  if(width <= 0 || height <= 0) {
+    return;
+  }
+
+  canvas.width = Math.round(width * pixelRatio);
+  canvas.height = Math.round(height * pixelRatio);
+
+  const context = canvas.getContext("2d");
+  context.scale(pixelRatio, pixelRatio);
+
+  const left = 42;
+  const right = width - 12;
+  const top = 20;
+  const bottom = height - 41;
+
+  const values = rows.flatMap(function(row) {
+    return series.map(function(entry) {
+      return row[entry[0]];
+    });
+  }).filter(Number.isFinite);
+
+  const minimum = Math.min(0, ...values);
+  const maximum = Math.max(1, ...values);
+  const valueRange = maximum - minimum;
+
+  context.font = "10px system-ui";
+  context.fillStyle = "#637872";
+  context.fillText(number(maximum) + " " + unit, 0, 12);
+  context.fillText(number(minimum), 0, bottom + 4);
+
+  for(let index = 0; index <= 2; index++) {
+    const y = top + index * (bottom - top) / 2;
+    context.strokeStyle = "#e4e9e1";
+    context.beginPath();
+    context.moveTo(left, y);
+    context.lineTo(right, y);
+    context.stroke();
+  }
+
+  drawChartTimeAxis(context, rows, left, right, top, bottom, height - 15);
+
+  if(rows.length < 2) {
+    context.fillText("In attesa di campioni…", left, 55);
+    return;
+  }
+
+  const firstSeconds = rows[0].s;
+  const rangeSeconds = Math.max(1, rows[rows.length - 1].s - firstSeconds);
+
+  function xAt(row) {
+    return left + (row.s - firstSeconds) / rangeSeconds * (right - left);
+  }
+
+  function yAt(value) {
+    return top + (maximum - value) / valueRange * (bottom - top);
+  }
+
+  for(const [key, color] of series) {
+    context.strokeStyle = color;
+    context.lineWidth = 1.8;
+    context.beginPath();
+
+    let connected = false;
+    for(const row of rows) {
+      if(!Number.isFinite(row[key])) {
+        connected = false;
+        continue;
+      }
+
+      if(!connected) {
+        context.moveTo(xAt(row), yAt(row[key]));
+      } else {
+        context.lineTo(xAt(row), yAt(row[key]));
+      }
+      connected = true;
+    }
+    context.stroke();
+  }
+
+  // Eventi di passaggio ON/OFF mantenuti come nella dashboard precedente.
+  for(let index = 1; index < rows.length; index++) {
+    const current = rows[index];
+    const previous = rows[index - 1];
+
+    if(current.known && previous.known && current.on !== previous.on) {
+      context.strokeStyle = current.on ? "#21634f" : "#bd6d42";
+      context.setLineDash([3, 3]);
+      context.beginPath();
+      context.moveTo(xAt(current), top);
+      context.lineTo(xAt(current), bottom);
+      context.stroke();
+      context.setLineDash([]);
+    }
+  }
+}
 
 // ============================================================================
 // STORICO AMBIENTALE - DUE ASSI E STATO DEL CLIMATIZZATORE
@@ -217,9 +433,10 @@ function drawEnvironmentChart(rows) {
   const left = 46;
   const right = 44;
   const top = 16;
-  const bottom = height - 60;
-  const stateTop = height - 42;
-  const stateHeight = 14;
+  // Spazio inferiore riservato allo stato IR e alle etichette orarie.
+  const bottom = height - 79;
+  const stateTop = height - 59;
+  const stateHeight = 13;
   const plotHeight = bottom - top;
   const plotWidth = width - left - right;
 
@@ -388,13 +605,22 @@ function drawEnvironmentChart(rows) {
     }
   }
 
-  // Etichette temporali: asse X espresso in secondi/minuti dall'avvio.
+  // Le etichette orarie sono allineate ai campioni e agli eventi.
+  // La fascia ON/OFF rimane distinguibile dall'asse temporale.
+  drawChartTimeAxis(
+    context,
+    rows,
+    left,
+    width - right,
+    top,
+    stateTop + stateHeight,
+    height - 11
+  );
+
   context.fillStyle = "#637872";
   context.textAlign = "left";
-  context.fillText("ON / OFF / ?", left, stateTop + stateHeight + 12);
-  context.textAlign = "right";
-  context.fillText("ultimi " + number(timeRange / 60, 1) + " min",
-    width - right, height - 5);
+  context.font = "10px system-ui";
+  context.fillText("Clima ON / OFF / ?", left, stateTop + stateHeight + 12);
 }
 
 const groups=[
