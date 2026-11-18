@@ -47,6 +47,40 @@ Un condensatore di disaccoppiamento vicino al circuito IR e alimentazione USB st
 
 VS1838B o equivalente a 38 kHz, alimentabile e con uscita compatibile a 3,3 V. Verificare l'ordine dei pin nel datasheet della variante, senza dedurlo dall'aspetto del contenitore. OUT→GPIO12, GND comune, VCC compatibile; disaccoppiamento secondo datasheet. Attivare `receiver` nella configurazione e riavviare. Disabilitato, il firmware non alloca il relativo buffer.
 
+### Modulo a tre pin G / R / Y (ricevitore IR trovato durante il collaudo)
+
+Il modulo fotografato dall'utente riporta le lettere **G**, **R**, **Y** sul connettore. Su questa famiglia di moduli a ricevitore IR la corrispondenza normalmente utilizzata e':
+
+| Sigla sulla scheda | Funzione prevista | NodeMCU / D1 Mini | GPIO |
+| --- | --- | --- | --- |
+| `G` | Ground, massa | `GND` | — |
+| `R` | Alimentazione del ricevitore | `3V3` | — |
+| `Y` | Uscita digitale demodulata | `D6` | `12` |
+
+**IMPORTANTE:** la presenza delle sole lettere non certifica il circuito interno o l'ordine fisico dei piedini. Prima di alimentare il modulo, verificare le serigrafie associate ai singoli pin, la compatibilita' con **3,3 V** e, se disponibile, lo schema del produttore o un controllo a multimetro con alimentazione scollegata. **Non collegare R a 5 V** durante il collaudo con ESP8266 e non collegare Y a un GPIO finche' la funzione dei pin non e' confermata.
+
+Schema logico, **non** vista meccanica del connettore:
+
+```text
+Modulo IR G / R / Y                NodeMCU ESP8266
+-------------------                --------------
+G (massa)       -----------------> GND
+R (alimentazione) ----------------> 3V3
+Y (uscita dati)  -----------------> D6 / GPIO12
+```
+
+**Procedura di acquisizione con la dashboard a schede:**
+
+1. Spegnere NodeMCU e collegare il ricevitore verificando le sigle **G, R, Y**.
+2. Aprire **Configurazione** > gruppo **Infrarossi**: abilitare `Ricevitore GPIO12 abilitato`. Salvare e riavviare dopo aver confermato che il climatizzatore sia fisicamente spento.
+3. Aprire **Panoramica** e scegliere **Diagnostica** come modalita' di controllo; poi aprire la scheda **Infrarossi**.
+4. Puntare il telecomando originale verso il ricevitore e premere **una volta** il tasto di interesse. Nella scheda **Infrarossi**, premere **Leggi acquisizione**.
+5. Verificare `protocol`, `length` e l'array `raw`. Una lunghezza nulla significa che non e' stata ottenuta una cattura valida; non salvare. Una cattura leggibile non prova ancora che il comando sia riproducibile dal trasmettitore.
+6. **Prima** acquisire e collaudare separatamente `HEAT ON` e `OFF`; solo successivamente considerare il comando `DRY` come esperimento separato. Il firmware **non** implementa attualmente una terza memoria comandi DRY: i pulsanti `Salva come ON` e `Salva come OFF` sovrascrivono gli slot destinati al riscaldamento e allo spegnimento.
+
+**Avvertenza di sicurezza:** non premere `Salva come ON` o `Salva come OFF` per il segnale DRY. Salvare una nuova cattura modifica LittleFS e revoca per sicurezza la verifica IR e l'abilitazione dell'automazione fino a un nuovo collaudo. I telecomandi dei climatizzatori possono inviare codici di stato completi e molto lunghi: la cattura puo' superare il limite attuale di 512 durate.
+
+
 Le catture RAW sono limitate a 512 durate da 16 bit a 38 kHz. Overflow, sequenze troppo lunghe o non valide non vengono salvati. Un ricevitore demodulante a 38 kHz non misura la frequenza portante: per telecomandi diversi verificare separatamente la portante. Allontanare ricevitore e trasmettitore per evitare auto-ricezione.
 
 Non intervenire su rete AC o cablaggi dell'inverter: questo progetto opera solo su bassa tensione, MQTT e IR.
