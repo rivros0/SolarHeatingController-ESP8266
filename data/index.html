@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Solar Heating · Controller</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
 <body><header><div class="brand"><span class="sun">☀</span><div>Solar Heating<small>CONTROLLO LOCALE · ESP8266</small></div></div><span id="connection" class="badge">Connessione…</span></header>
-<main><section class="intro"><div><p class="eyebrow">ENERGIA CHE DIVENTA COMFORT</p><h1>La casa, al ritmo del sole.</h1><p>Prima i carichi domestici, poi le batterie. Il surplus diventa riscaldamento.</p></div><a class="button secondary" href="/update">Aggiorna firmware ↗</a></section>
+<main>
 
 <div id="notice" role="status" aria-live="polite"></div>
 
@@ -16,6 +16,7 @@
 
 <!-- I pannelli non selezionati restano nel DOM: tutti gli ID/API rimangono invariati. -->
 <section class="tab-panel" id="tab-overview" role="tabpanel" aria-labelledby="tab-button-overview">
+  <section class="intro"><div><p class="eyebrow">ENERGIA CHE DIVENTA COMFORT</p><h1>La casa, al ritmo del sole.</h1><p>Prima i carichi domestici, poi le batterie. Il surplus diventa riscaldamento.</p></div><a class="button secondary" href="/update">Aggiorna firmware ↗</a></section>
   <section class="cards" aria-label="Misure live">
 <article><span>Produzione fotovoltaica</span><strong id="pv">—</strong><small>W · produzione istantanea</small></article>
 <article><span>Consumo abitazione</span><strong id="load">—</strong><small>W · climatizzatore incluso</small></article>
