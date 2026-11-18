@@ -116,6 +116,12 @@ class EnergyManager {
     const bool humidityHeatDemand = c.humidityAssist && humidityDemand_ &&
       temperature.value < c.tempOff - 0.5f;
 
+    // Una richiesta termica successiva assume la priorita' su un avvio da UR:
+    // resta quindi la normale isteresi termica fino a tempOff.
+    if(commandedOn && tempDemand) {
+      humidityOnlyRun_ = false;
+    }
+
     // Se il ciclo era iniziato soltanto per UR e questa e' rientrata,
     // arrestiamo dopo il minimo funzionamento. Un'autentica richiesta termica
     // prevale sempre e mantiene la vecchia isteresi tempOn/tempOff.
