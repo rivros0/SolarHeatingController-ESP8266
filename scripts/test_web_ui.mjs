@@ -33,7 +33,7 @@ const tabIds = [
 ];
 
 const foundIds = [];
-const idMatcher = /\\bid="([^"]+)"/g;
+const idMatcher = /\bid="([^"]+)"/g;
 let match;
 
 while((match = idMatcher.exec(html)) !== null) {
