@@ -2,7 +2,7 @@
 
 Controller locale per usare il surplus fotovoltaico nel riscaldamento di un climatizzatore Hisense, mantenendo priorità ai carichi domestici e alla ricarica batterie. Firmware Arduino per **NodeMCU ESP8266 e Wemos D1 Mini da 4 MB**, dashboard HTML/CSS/JS su LittleFS, SolarAssistant via MQTT, SHT31 e IRremoteESP8266. Nessun servizio cloud necessario.
 
-**Versione 0.3.3 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
+**Versione 0.3.4 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
 
 ## Funzioni
 
@@ -42,6 +42,40 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 9. Per verificare nuovi firmware direttamente da GitHub apri `/update`, consulta il canale firmware-stable e scegli l'installazione. Vedere [OTA.md](docs/OTA.md).
 
 Al riavvio il controller entra sempre in **Forza OFF con stato fisico sconosciuto**. Non invia un toggle e non presume che il climatizzatore sia spento. Se dispone già di codici discreti verificati, Forza OFF o una protezione possono inviare un unico OFF preventivo anche da stato sconosciuto. L'ultima modalità richiesta è salvata a fini diagnostici; la ripartenza automatica dopo un reset richiede una nuova conferma fisica o un comando OFF discreto. Questa scelta evita avvii e inversioni inattesi dopo OTA o interruzioni di alimentazione.
+
+## Conferma fisica OFF contestuale (v0.3.4)
+
+Non occorre più cercare il pulsante di conferma nella scheda
+Infrarossi/Diagnostica. Le operazioni che richiedono la verifica
+dello spegnimento aprono **direttamente un popup contestuale**:
+
+- **Salva configurazione** e **Riavvia e applica**;
+- **Automatico/Forza ON**, quando lo stato fisico e' sconosciuto;
+- **Salva codici infrarossi HEAT ON/OFF**;
+- **Apprendimento: riferimento e salvataggio finale**;
+- **Aggiornamento da GitHub e caricamento .bin** (popup OTA gia' presente).
+
+Il popup richiede di aver **osservato realmente lo stato fisico OFF**
+del climatizzatore. Il pulsante **Annulla** impedisce l'operazione
+e non modifica lo stato del controller. Con OK la dashboard chiama
+l'endpoint autenticato e protetto CSRF
+`POST /api/confirm-physical-off`. Questo endpoint registra
+esclusivamente la dichiarazione dell'operatore: **non invia comandi IR**
+e non aggira le verifiche di sicurezza di ciascuna operazione.
+La modalita' Forza OFF, che invia un comando di arresto quando possibile,
+non richiede di attestare anticipatamente che il clima sia gia' spento.
+
+Le conferme manuali opzionali della scheda Infrarossi restano
+disponibili per le prove e la diagnostica; non sono piu' un
+prerequisito da cercare in un'altra sezione.
+
+**Installazione:** il backend dell'endpoint e' nel firmware 0.3.4,
+i nuovi popup nella dashboard LittleFS. Dalla 0.3.3 usare
+**Installa aggiornamenti da GitHub** per aggiornare entrambi;
+in alternativa caricare il firmware USB e poi aggiornare l'interfaccia
+tramite la stessa pagina OTA. L'OTA selettivo web conserva
+configurazioni, credenziali e IR RAW. `uploadfs`, invece, sovrascrive
+il filesystem completo.
 
 ## Correzione manifest OTA GitHub (v0.3.3)
 
