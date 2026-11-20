@@ -1,84 +1,109 @@
-# OTA e recupero
+# Aggiornamento OTA e recupero USB
 
-## Layout flash verificabile
+## Principio di funzionamento (firmware 0.3.2)
 
-`platformio.ini` imposta entrambe le schede su `eagle.flash.4m1m.ld`: flash fisica 4 MB, LittleFS da circa 1 MB, sketch massimo 1.044.464 byte. Lo spazio tra sketch e filesystem permette lo staging OTA. Il firmware riporta `ESP.getFreeSketchSpace()` in `/api/state`; la libreria Update verifica lo spazio effettivo e l'immagine. Il browser rifiuta file più grandi del margine riportato meno 4096 byte, mentre il backend usa il margine allineato a settore.
+Il controller consente due modalità di manutenzione:
 
-Il server usa l'Updater del core ESP8266, solo `U_FLASH`. Non accetta immagini filesystem via OTA. Non è implementato un rollback automatico A/B: ESP8266 usa il bootloader e lo staging previsti dal core. Riferimento: [documentazione ufficiale OTA ESP8266](https://arduino-esp8266.readthedocs.io/en/latest/ota_updates/readme.html).
+| Procedura | Firmware | Interfaccia web | Configurazioni / credenziali / IR RAW |
+| --- | --- | --- | --- |
+| **Aggiorna da GitHub** (`/update`) | Se più recente | Se differente, anche a firmware invariato | **Conservati** |
+| **Carica firmware .bin** (`/update`) | Sostituito | Invariata | **Conservati** |
+| **Upload USB firmware** (`pio run -t upload`) | Sostituito | Invariata | **Conservati**, se layout invariato |
+| **Upload USB LittleFS** (`pio run -t uploadfs`) | Invariato | Sostituita integralmente | **Cancellati** |
 
-## Procedura
+Il canale **firmware-stable** di GitHub contiene il firmware per ciascuna
+scheda e **tre file web pubblici**:
 
-1. Compilare il progetto con la corretta scheda: `pio run -e d1_mini` o `nodemcuv2`.
-2. Spegnere il climatizzatore con un comando verificato o il telecomando e verificarlo fisicamente. In Diagnostica scegliere “Confermo: fisicamente spento”. La sola stima di potenza non basta.
-3. Aprire `/update` dalla LAN o VPN ed autenticarsi. Selezionare `.pio/build/<scheda>/firmware.bin`, **non** `littlefs.bin`.
-4. Mantenere alimentazione stabile e attendere la risposta. Il server verifica autenticazione, CSRF, stato spento, scrittura e validità dell'immagine. In caso di fallimento non programma un riavvio.
-5. Dopo esito positivo il dispositivo si riavvia con ritardo di 1,5 s per completare la risposta. Ricaricare la dashboard e controllare versione, motivo reset e configurazione. Una caduta di rete durante il caricamento richiede verifica prima di riprovare.
-6. Dopo riavvio, stato fisico sconosciuto e Forza OFF. Confermare nuovamente prima dell'automazione.
+- `web-index.html` → `/index.html`
+- `web-app.js` → `/app.js`
+- `web-style.css` → `/style.css`
 
-La conservazione configurazione deriva dalla separazione fra sketch e LittleFS e richiede mantenere il medesimo layout flash. Gli eventi RAM si perdono al riavvio; il messaggio HTTP conferma la finalizzazione dell'upload, la versione al rientro conferma il firmware in esecuzione. Non viene dichiarato un esito persistente dell'OTA che il dispositivo non può dimostrare dopo un reset.
+**Non sono pubblicati né scaricati** `config.json`, `config.bak`,
+`/mode.txt`, password, credenziali MQTT e `/ir-on.raw`/`/ir-off.raw`.
+
+Il manifest `firmware/stable.json` riporta per ogni asset dimensione e
+SHA-256. Il controller confronta anche il contenuto **effettivo** dei tre
+file già presenti in LittleFS: non si affida a un numero di versione web
+salvato nel filesystem. Questo permette di individuare una pagina obsoleta
+dopo una reinstallazione o un download interrotto.
+
+## Aggiornamento completo da GitHub
+
+1. Assicurarsi che climatizzatore e impianto siano in condizioni sicure.
+   Aprire `http://<ip-esp>/update` da LAN fidata.
+2. Premere **Verifica aggiornamenti**: si vedranno separatamente lo stato
+   del **firmware** e dell'**interfaccia web**, compreso il numero di file da
+   aggiornare. Il controllo può rilevare un'interfaccia nuova anche quando
+   il firmware è già aggiornato.
+3. Premere **Installa aggiornamenti da GitHub**.
+4. Il popup richiede di verificare **fisicamente** che il climatizzatore
+   sia spento. Il pulsante Annulla interrompe l'operazione. Con OK,
+   un'API autenticata registra lo stato OFF e passa a **Forza OFF**,
+   senza inviare IR.
+5. Il controller scarica **soltanto i file web differenti** in file
+   temporanei sulla propria LittleFS. Ogni file deve superare il controllo
+   di dimensione e SHA-256. Solo dopo aver verificato tutti i file, li
+   sostituisce individualmente con rename.
+6. Se esiste un firmware più recente, il controller lo scarica, ne verifica
+   SHA-256 e formato, lo installa nello spazio OTA del core ESP8266 e
+   programma un riavvio. Se cambia soltanto l'interfaccia web, non
+   riavvia il dispositivo.
+7. Dopo il completamento, ricaricare la dashboard con **Ctrl+Shift+R**
+   per evitare la cache del browser. Verificare Wi-Fi/MQTT, valori,
+   configurazione, comandi IR e versione effettivamente avviata.
+
+**In caso di Wi-Fi debole:** il download può fallire per timeout, HTTP o
+checksum. Le risorse correnti rimangono disponibili se l'errore avviene
+durante lo staging. Se si perde alimentazione durante la sostituzione,
+alcuni asset potrebbero essere già nuovi e altri ancora vecchi: il
+successivo controllo SHA-256 individua i file da completare. Non viene
+cancellato il filesystem. Il controller non esegue mai aggiornamenti
+automaticamente senza comando esplicito.
+
+## Pubblicazione GitHub
+
+Il workflow `.github/workflows/firmware-release.yml`:
+
+1. esegue i test e compila `nodemcuv2` e `d1_mini`;
+2. copia `data/index.html`, `data/app.js`, `data/style.css` come
+   asset `web-*`;
+3. calcola SHA-256 e dimensioni per firmware e web;
+4. pubblica tutti gli asset nella release `firmware-stable`;
+5. **solo dopo** aggiorna `firmware/stable.json` sul ramo `main`.
+
+La release del contenitore CAD resta indipendente. Gli asset pubblicati
+sono esclusivamente file statici e binari, senza informazioni riservate.
+
+## Sicurezza e limiti
+
+- TLS HTTPS con verifica dei certificati CA e verifica hash dei file.
+  Non viene utilizzato `setInsecure()`.
+- È necessaria un'ora NTP valida per verificare i certificati.
+- Il manifest indica i file consentiti e le loro dimensioni, ma
+  **non può scegliere percorsi arbitrari** nel filesystem.
+- File temporanei e verifica preventiva limitano i rischi di download
+  incompleti. Un'interruzione proprio durante la sostituzione può
+  richiedere di ripetere l'operazione.
+- L'OTA firmware usa soltanto `U_FLASH`, mai `U_FS`, e mantiene il
+  layout `eagle.flash.4m1m.ld`. Non c'è rollback automatico A/B.
+- Richiesti HTTP Basic, token CSRF e conferma fisica OFF.
+- Non esporre la dashboard o l'OTA direttamente a Internet tramite
+  port forwarding. Utilizzare LAN fidata o VPN terminata su gateway.
+- Se lo spazio libero LittleFS non è sufficiente per lo staging, il
+  controller rifiuta l'aggiornamento con un messaggio esplicito.
 
 ## Recupero USB
 
-Se l'applicazione non torna raggiungibile:
+1. Verificare lo stato fisico del climatizzatore; gestirlo con il suo
+   telecomando se il controller non è raggiungibile.
+2. Collegare USB e identificare la porta CH340 con `pio device list`
+   (per esempio `/dev/ttyUSB1`, non il numero di dispositivo USB).
+3. Ricaricare il firmware: `pio run -e nodemcuv2 -t upload --upload-port /dev/ttyUSB1`.
+   Questo comando conserva normalmente LittleFS.
+4. Consultare i log seriali a 115200 baud; il bootloader ROM stampa a
+   74880 baud e può produrre caratteri iniziali incomprensibili.
+5. **Solo come ultima risorsa**, `pio run -e nodemcuv2 -t uploadfs --upload-port /dev/ttyUSB1`.
+   Questo comando sovrascrive l'intero LittleFS e cancella configurazioni,
+   credenziali e codici IR. Salvare prima i dati se recuperabili.
 
-1. Verificare se il climatizzatore è rimasto acceso e gestirlo con il telecomando.
-2. Collegare USB, identificare porta e scheda, controllare alimentazione e log a 115200 baud (boot ROM a 74880 baud).
-3. Tentare `pio run -e <scheda> -t upload`. Questo sostituisce lo sketch lasciando il filesystem, se layout e flash sono coerenti.
-4. Se l'autoboot non funziona, entrare nella modalità flash secondo la scheda: GPIO0 a GND durante reset, poi rilasciare dopo l'avvio del caricamento.
-5. Se LittleFS/config è corrotto, il firmware arresta le funzioni invece di formattare o sovrascrivere. Conservare un dump se necessario. Come ultimo recupero caricare `uploadfs` via USB: **questa operazione cancella configurazione e codici IR presenti nel filesystem**. Recuperare i valori dall'export redatto e reimmettere credenziali/catture. Verrà generata una nuova password iniziale sul seriale.
-
-Non cambiare dimensione flash o layout senza backup. Non fare port forwarding. Tailscale termina su gateway/router, non sul microcontrollore. HTTP Basic su LAN non equivale a cifratura TLS.
-
-## Aggiornamento diretto da GitHub (versione 0.2.0)
-
-È disponibile una seconda modalità nella stessa pagina `/update`. Non sostituisce
-l'OTA manuale, che continua a funzionare anche se Internet non è accessibile.
-
-### Preparazione della release
-
-Il workflow `.github/workflows/firmware-release.yml` esegue i test, compila
-`nodemcuv2` e `d1_mini`, calcola gli SHA256 e pubblica SOLO i binari nella
-release `firmware-stable`. Dopo aver caricato entrambi gli asset, aggiorna
-`firmware/stable.json` sul branch `main`.
-
-La release dedicata al case 3D, `case-v0.1`, non viene mai considerata.
-I binari delle due schede hanno nomi diversi e non sono intercambiabili.
-Il workflow viene eseguito quando i sorgenti cambiano su `main`, oppure
-manualmente da Actions. Richiede permesso `contents:write` per il workflow.
-Una modifica nella sola cartella del CAD non pubblica un nuovo firmware.
-
-### Installazione dal dispositivo
-
-1. Collegare l'ESP8266 alla rete con accesso a Internet e DNS correttamente
-   configurato (necessario anche quando si imposta IPv4 statico).
-2. Attendere la sincronizzazione NTP; senza un'ora valida TLS rifiuta il download.
-3. Spegnere fisicamente il climatizzatore Hisense e confermare **OFF** nella
-   dashboard Diagnostica.
-4. Aprire `/update`, selezionare **Verifica aggiornamenti**.
-5. Se la versione GitHub è successiva e compatibile, selezionare
-   **Installa da GitHub**, confermando l'operazione.
-6. Il firmware viene prima scaricato su file temporaneo LittleFS, poi viene
-   controllato contro il checksum SHA256 del manifest; solo a quel punto
-   viene scritto sulla partizione firmware OTA.
-7. L'ESP8266 si riavvia in Forza OFF e stato fisico sconosciuto.
-   Verificare versione, configurazione e stato del climatizzatore.
-
-### Protezioni e limiti
-
-- HTTPS usa una catena CA verificabile; non usa `setInsecure()`.
-  I certificati pubblici vengono incorporati al momento della compilazione
-  dall'archivio CA della macchina di build.
-- Se GitHub cambia catena CA, l'aggiornamento diretto può smettere di
-  funzionare finché i CA non vengono aggiornati in un firmware successivo.
-  In tale caso utilizzare l'OTA manuale, non disabilitare la verifica TLS.
-- Se l'orologio NTP non è sincronizzato, il download è rifiutato.
-- Il filesystem LittleFS deve avere spazio libero almeno pari al firmware,
-  più un margine di sicurezza. In caso contrario utilizzare l'OTA manuale.
-- Dopo una perdita di rete o un checksum errato il firmware nuovo non viene
-  attivato. Una perdita di alimentazione durante la fase finale di flash
-  richiede comunque la procedura di recupero USB.
-- Il firmware ESP8266 non dispone di un rollback automatico A/B.
-- La modalità automatica non avvia mai aggiornamenti da sola: occorre
-  un comando autenticato con token CSRF.
-- Le credenziali restano in `config.json` su LittleFS; il firmware OTA non
-  modifica `data/` né sovrascrive il filesystem.
+Non cambiare dimensione flash o layout senza backup.
