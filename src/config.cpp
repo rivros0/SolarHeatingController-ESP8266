@@ -8,6 +8,41 @@
 #endif
 Config cfg;
 bool storageReady=false,configReady=false;
+
+// ============================================================================
+// PROFILO SOLARASSISTANT - IMPIANTO DOMESTICO
+//
+// Topic realmente rilevati dal broker 192.168.1.240:1883.
+// La prima configurazione utilizza questo profilo per evitare topic vuoti.
+// Non modifica password, identita' Wi-Fi, protezioni o impostazioni IR.
+// Le configurazioni gia' salvate su LittleFS sono sempre preservate:
+// la modifica esplicita avviene tramite il pulsante della dashboard.
+// ============================================================================
+static void setKnownSolarAssistantDefaults(Config& target) {
+  target.mqttHost = "192.168.1.240";
+  target.mqttPort = 1883;
+  target.discovery = "solar_assistant/#";
+
+  target.topics[0] = "solar_assistant/inverter_1/pv_power/state";
+  target.topics[1] = "solar_assistant/inverter_1/load_power/state";
+  target.topics[2] = "solar_assistant/total/battery_power/state";
+  target.topics[3] = "solar_assistant/battery_1/voltage/state";
+  target.topics[4] = "solar_assistant/battery_1/current/state";
+  target.topics[5] = "solar_assistant/total/battery_state_of_charge/state";
+
+  // grid_power e' una singola potenza di rete, non due misure
+  // indipendenti di import/export. Non associare a entrambe.
+  target.topics[6] = "";
+  target.topics[7] = "";
+  target.topics[8] = "solar_assistant/inverter_1/device_mode/state";
+
+  // Il log reale mostra -574 W e -12 A durante la SCARICA.
+  target.energy.negativeCharge = false;
+  target.energy.negativeCurrentCharge = false;
+
+  // Il nuovo profilo richiede collaudo prima di abilitare l'automazione.
+  target.automationEnabled = false;
+}
 static void encode(JsonObject o,const Config& c,bool secrets) {
   o["version"]=2;
 #define FIELD(n) o[#n]=c.n
@@ -153,6 +188,11 @@ void loadConfig() {
     if(!err && parseConfig(doc.as<JsonObjectConst>(),candidate,why)) { cfg=candidate; configReady=true; return; }
   }
   if(exists) { Serial.println(F("Configurazione corrotta/futura: recuperare via USB. Nessuna sovrascrittura.")); return; }
+
+  // Solo prima installazione: non sovrascrive /config.json esistenti.
+  // In caso di profilo gia' salvato, usare la funzione della dashboard.
+  setKnownSolarAssistantDefaults(cfg);
+
   char password[25]; snprintf(password,sizeof(password),"%08lx%08lx%08lx",os_random(),os_random(),os_random());
   cfg.adminPassword=password;
 

@@ -787,6 +787,78 @@ document.querySelectorAll("[data-mode]").forEach(function(button) {
   };
 });
 
+// ============================================================================
+// PROFILO MQTT SOLARASSISTANT - ASSOCIAZIONE MISURE VERIFICATA
+//
+// Il pulsante salva soltanto host, porta, filtro e associazioni misure
+// individuati sul broker domestico. Le credenziali MQTT, Wi-Fi e web non
+// vengono lette o riscritte: il firmware conserva i valori gia' salvati.
+//
+// Un solo popup contestuale conferma lo spegnimento fisico prima del POST.
+// Il firmware richiede comunque CSRF, autenticazione e stato OFF noto.
+// L'automazione viene disabilitata finche' non si verificano i nuovi dati.
+// ============================================================================
+function knownSolarAssistantConfig(currentConfig) {
+  const updated = structuredClone(currentConfig);
+
+  updated.mqttHost = "192.168.1.240";
+  updated.mqttPort = 1883;
+  updated.discovery = "solar_assistant/#";
+
+  updated.topics = {
+    pv: "solar_assistant/inverter_1/pv_power/state",
+    load: "solar_assistant/inverter_1/load_power/state",
+    battery: "solar_assistant/total/battery_power/state",
+    voltage: "solar_assistant/battery_1/voltage/state",
+    current: "solar_assistant/battery_1/current/state",
+    soc: "solar_assistant/total/battery_state_of_charge/state",
+    import: "",
+    export: "",
+    inverter: "solar_assistant/inverter_1/device_mode/state"
+  };
+
+  updated.energy.negativeCharge = false;
+  updated.energy.negativeCurrentCharge = false;
+  updated.automationEnabled = false;
+
+  return updated;
+}
+
+$("applySolarAssistantTopics").onclick = function() {
+  // Il profilo e' applicato alla configurazione gia' presente nel firmware,
+  // non a un oggetto vuoto: password e parametri estranei restano invariati.
+  // Il backend fa parseConfig() su una copia della configurazione corrente.
+  async function applyProfile() {
+    try {
+      const next = knownSolarAssistantConfig(config);
+
+      const accepted = await confirmPhysicalOffForAction(
+        "Applicare il profilo MQTT SolarAssistant del broker 192.168.1.240. " +
+        "I topic e il segno batteria saranno aggiornati; " +
+        "le credenziali resteranno invariate e l'automazione sarà disabilitata."
+      );
+
+      if(!accepted) {
+        return;
+      }
+
+      await api("/api/config", next);
+      config = next;
+      fields();
+
+      notice(
+        "Profilo SolarAssistant salvato. Le credenziali sono conservate. " +
+        "Premi «Riavvia e applica» per aggiornare le sottoscrizioni MQTT. " +
+        "Mantieni l'automazione disabilitata fino alla verifica dei valori."
+      );
+    } catch(error) {
+      notice("Profilo SolarAssistant non applicato: " + error.message);
+    }
+  }
+
+  applyProfile();
+};
+
 $("settings").onsubmit = function(event) {
   event.preventDefault();
   act(async function() {

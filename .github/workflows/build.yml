@@ -16,6 +16,8 @@ jobs:
         run: node scripts/test_chart_time.mjs
       - name: Test conferma stato fisico OFF da ogni scheda
         run: node scripts/test_off_confirmation.mjs
+      - name: Test profilo MQTT SolarAssistant e preservazione credenziali
+        run: node scripts/test_solarassistant_profile.mjs
       - name: Test OTA dashboard incrementale e sintassi pagina update
         run: node scripts/test_ota_web.mjs
   firmware:

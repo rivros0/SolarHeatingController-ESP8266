@@ -20,6 +20,36 @@ Tutti gli endpoint, inclusi gli asset, richiedono HTTP Basic. Le mutazioni POST 
 
 Risposte: 400 richiesta/config non valida; 401 autenticazione; 403 token; 409 stato/procedura incompatibile; 413 corpo eccessivo; 503 configurazione/memoria non disponibile; 507 scrittura configurazione fallita.
 
+## Profilo MQTT preconfigurato (v0.3.5)
+
+`data/app.js` offre il pulsante **Applica profilo MQTT SolarAssistant**.
+Il profilo usa il broker `192.168.1.240:1883`, i sette
+topic osservati nel log (PV `inverter_1/pv_power`, carichi
+`inverter_1/load_power`, batteria `total/battery_power`, tensione
+e corrente `battery_1`, SOC `total/battery_state_of_charge`
+e stato inverter `inverter_1/device_mode`).
+
+Il pulsante prepara una copia della configurazione attuale,
+aggiorna soltanto broker, porta, filtro diagnostico, mappatura topic,
+convenzione segni batteria, e disattiva l'automazione. Con conferma
+fisica OFF, invia l'ordinaria `POST /api/config` con token CSRF.
+Poiche' il JSON letto da `/api/config` non contiene le password, il
+firmware conserva le password salvate quando quei campi sono omessi.
+Il riavvio e' necessario per rinnovare connessione e sottoscrizioni.
+
+I valori iniziali del firmware in `src/config.cpp` riportano lo
+stesso profilo, ma sono applicati **soltanto se non esiste**
+`/config.json` o `/config.bak` valido. Aggiornare il firmware
+da solo **non altera** i topic gia' salvati; usare il pulsante
+per applicare il profilo a una configurazione esistente.
+
+La potenza e corrente batteria negative sono scarica: entrambe
+le opzioni `negativeCharge` e `negativeCurrentCharge` restano
+`false`. Import/export non vengono mappati automaticamente dalla
+sola `grid_power` senza convalida della convenzione del segno.
+Se il broker richiede credenziali, devono essere gia' presenti
+e valide nella configurazione locale. Non inserirle nel repository.
+
 ## Conferma OFF contestuale, senza cambio scheda (v0.3.4)
 
 Quando l'utente preme un pulsante che richiede stato fisico OFF,
