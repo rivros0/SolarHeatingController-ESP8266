@@ -522,7 +522,7 @@ void setupRoutes() {
   });
   web.on("/api/reboot",HTTP_POST,[] {
     if(!mutation()) return;
-    if(!infrared.known||infrared.on) { web.send(409,"text/plain","Confermare climatizzatore fisicamente spento in diagnostica"); return; }
+    if(!infrared.known||infrared.on) { web.send(409,"text/plain","Confermare climatizzatore fisicamente spento nel popup del riavvio"); return; }
     rebootAt=millis()+1500; web.send(200,"application/json","{}");
   });
   // ======================================================================
@@ -848,7 +848,7 @@ void loop() {
     auto d=manager.evaluate(now,cfg.energy,energy,environment.temperature,mode,infrared.known&&infrared.on,
                             mqtt.connected()&&gridOk,ready,expired,environment.humidity);
     availableW=d.available;
-    if(!infrared.known) reason="Stato sconosciuto: confermare lo stato fisico in diagnostica";
+    if(!infrared.known) reason="Stato sconosciuto: confermare nel popup dell'operazione richiesta";
     else reason=d.reason;
     const bool safeUnknownOff=!infrared.known && infrared.automaticReady() && mode!=Mode::Diagnostic &&
       (d.critical || mode==Mode::ForceOff || (environment.temperature.valid && environment.temperature.value>=cfg.energy.tempOff));
