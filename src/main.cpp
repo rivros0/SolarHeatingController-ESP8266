@@ -13,7 +13,7 @@
 #include <time.h>
 #include "environment_manager.h"
 using namespace solar;
-static const char* VERSION="0.3.1";
+static const char* VERSION="0.3.2";
 ESP8266WebServer web(80);
 AsyncMqttClient mqtt;
 Adafruit_SHT31 sht;
@@ -527,18 +527,34 @@ void setupRoutes() {
     if(!authenticated()) return;
     GithubFirmwareInfo info;
     String error;
-    DynamicJsonDocument response(640);
-    bool checked=githubFirmwareCheck(VERSION,info,error);
-    response["checked"]=checked;
-    response["board"]=githubFirmwareBoard();
-    response["installed"]=VERSION;
+    DynamicJsonDocument response(1024);
+    const bool checked = githubFirmwareCheck(VERSION, info, error);
+    response["checked"] = checked;
+    response["board"] = githubFirmwareBoard();
+    response["installed"] = VERSION;
+
     if(checked) {
-      response["version"]=info.version;
-      response["size"]=info.size;
-      response["available"]=info.available;
+      response["version"] = info.version;
+      response["size"] = info.size;
+
+      // Compatibilita' API: "available" indica qualsiasi aggiornamento.
+      response["available"] = githubAnythingAvailable(info);
+      response["firmwareAvailable"] = info.available;
+      response["webSupported"] = info.webSupported;
+      response["webAvailable"] = info.webAvailable;
+
+      unsigned int filesToUpdate = 0;
+      for(size_t index = 0; index < GITHUB_WEB_ASSET_COUNT; index++) {
+        if(info.web[index].needsUpdate) {
+          filesToUpdate++;
+        }
+      }
+      response["webFilesToUpdate"] = filesToUpdate;
     } else {
-      response["error"]=error;
-      response["available"]=false;
+      response["error"] = error;
+      response["available"] = false;
+      response["firmwareAvailable"] = false;
+      response["webAvailable"] = false;
     }
     jsonReply(response);
   });
@@ -562,25 +578,55 @@ void setupRoutes() {
       web.send(502,"text/plain",error);
       return;
     }
-    if(!info.available) {
-      web.send(409,"text/plain","Nessuna versione successiva disponibile.");
+    if(!githubAnythingAvailable(info)) {
+      web.send(409,"text/plain","Firmware e interfaccia web gia' aggiornati.");
       return;
     }
-    updateActive=true;
-    logEvent(String("GitHub OTA iniziato: ")+info.version);
-    bool installed=githubFirmwareInstall(info,error);
-    updateActive=false;
-    if(!installed) {
-      logEvent(String("GitHub OTA fallito: ")+error);
-      web.send(502,"text/plain",error);
-      return;
+
+    updateActive = true;
+    logEvent(String("OTA GitHub iniziato: ") + info.version);
+
+    // Prima aggiorniamo i file web verificati, senza formattare LittleFS.
+    // Se il download fallisce, il firmware rimane quello gia' installato.
+    bool webInstalled = false;
+    if(info.webAvailable) {
+      logEvent("OTA GitHub: download e verifica file dashboard");
+      if(!githubWebInstall(info, error)) {
+        updateActive = false;
+        logEvent(String("OTA web fallito: ") + error);
+        web.send(502,"text/plain",error);
+        return;
+      }
+      webInstalled = true;
+      logEvent("OTA GitHub: dashboard aggiornata senza perdere configurazioni");
     }
-    logEvent(String("GitHub OTA completato: ")+info.version);
-    DynamicJsonDocument response(256);
-    response["installed"]=true;
-    response["version"]=info.version;
+
+    bool firmwareInstalled = false;
+    if(info.available) {
+      logEvent(String("OTA GitHub: installazione firmware ") + info.version);
+      if(!githubFirmwareInstall(info, error)) {
+        updateActive = false;
+        logEvent(String("OTA firmware fallito: ") + error);
+        web.send(502,"text/plain",
+                 error + ". La dashboard eventualmente aggiornata e' conservata.");
+        return;
+      }
+      firmwareInstalled = true;
+      logEvent(String("OTA firmware completato: ") + info.version);
+    }
+
+    updateActive = false;
+    DynamicJsonDocument response(320);
+    response["installed"] = true;
+    response["version"] = info.version;
+    response["firmwareInstalled"] = firmwareInstalled;
+    response["webInstalled"] = webInstalled;
+    response["rebooting"] = firmwareInstalled;
     jsonReply(response);
-    rebootAt=millis()+1500;
+
+    if(firmwareInstalled) {
+      rebootAt = millis() + 1500;
+    }
   });
 
   web.on("/update",HTTP_GET,[] {

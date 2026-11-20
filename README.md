@@ -2,7 +2,7 @@
 
 Controller locale per usare il surplus fotovoltaico nel riscaldamento di un climatizzatore Hisense, mantenendo priorità ai carichi domestici e alla ricarica batterie. Firmware Arduino per **NodeMCU ESP8266 e Wemos D1 Mini da 4 MB**, dashboard HTML/CSS/JS su LittleFS, SolarAssistant via MQTT, SHT31 e IRremoteESP8266. Nessun servizio cloud necessario.
 
-**Versione 0.3.1 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
+**Versione 0.3.2 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
 
 ## Funzioni
 
@@ -16,7 +16,7 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 - Stato comandato separato da stima, confidenza e stato sconosciuto; apprendimento guidato e riconoscimento variazioni di carico con riferimento e attesa compressore.
 - Dashboard responsive **a cinque schede**, grafici senza dipendenze esterne, diagnostica, esportazione configurazione senza credenziali, 120 campioni e 16 eventi in RAM.
 - OTA firmware `.bin` autenticato su `/update`, controllo errori, riavvio differito e conservazione LittleFS.
-- Aggiornamento da GitHub (release firmware-stable) con controllo versione, board, HTTPS verificato e SHA256 prima di installare.
+- Aggiornamento da GitHub (release firmware-stable) di **firmware e interfaccia web** con controllo versione, board, HTTPS verificato e SHA256. La dashboard e' verificata per singolo file: si puo' aggiornare senza cambiare versione firmware e senza cancellare credenziali, configurazione o codici IR.
 - Credenziali iniziali Wi-Fi/admin in file locale escluso da Git e configurazione IPv4 statico (gateway, subnet, DNS).
 - Configurazione versionata, migrazione v1→v2, backup e sostituzione tramite file temporaneo. Nessuna formattazione automatica.
 
@@ -43,6 +43,36 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 
 Al riavvio il controller entra sempre in **Forza OFF con stato fisico sconosciuto**. Non invia un toggle e non presume che il climatizzatore sia spento. Se dispone già di codici discreti verificati, Forza OFF o una protezione possono inviare un unico OFF preventivo anche da stato sconosciuto. L'ultima modalità richiesta è salvata a fini diagnostici; la ripartenza automatica dopo un reset richiede una nuova conferma fisica o un comando OFF discreto. Questa scelta evita avvii e inversioni inattesi dopo OTA o interruzioni di alimentazione.
 
+## OTA integrato firmware e interfaccia web (v0.3.2)
+
+Il pulsante **Installa aggiornamenti da GitHub** permette ora di aggiornare
+**entrambe le componenti**:
+
+| Componente | Quando viene installata | Dati conservati |
+| --- | --- | --- |
+| Firmware | Se GitHub pubblica una versione superiore | LittleFS |
+| Dashboard HTML/JS/CSS | Quando SHA256 o dimensione sono differenti | Configurazioni, password, topic, IR RAW |
+
+La pagina OTA mostra separatamente firmware e dashboard, anche quando il
+firmware e' gia' aggiornato. La release `firmware-stable` pubblica
+`web-index.html`, `web-app.js`, `web-style.css` oltre ai firmware `.bin`.
+I file sono verificati SHA256 prima di sostituire
+`/index.html`, `/app.js`, `/style.css` uno per uno in LittleFS.
+Non viene caricato `littlefs.bin` e non avviene alcuna formattazione:
+`config.json`, password MQTT/Wi-Fi, impostazioni e codici RAW IR
+restano intatti.
+
+**Per il primo passaggio da 0.3.1 a 0.3.2** occorre installare il nuovo
+firmware tramite USB o caricamento manuale `.bin`, perché la 0.3.1
+non conosce ancora gli asset web del manifest. Da allora il pulsante
+GitHub aggiornera' autonomamente anche la dashboard. L'aggiornamento
+della sola UI non forza un riavvio; ricaricare il browser con
+`Ctrl+Shift+R`. Il download e' autenticato e la conferma fisica OFF
+resta obbligatoria.
+
+Per limiti, staging, recupero e compatibilita' vedere
+[docs/OTA.md](docs/OTA.md).
+
 ## Aggiornamento OTA: conferma OFF nella pagina (v0.3.1)
 
 La pagina **Aggiorna firmware** apre un popup prima di **Installa da
@@ -62,8 +92,8 @@ compilazione** e incorporato nel firmware come risorsa PROGMEM. Di
 conseguenza basta il **solo upload USB del firmware 0.3.1** per aggiornare
 anche la pagina `/update`. Non serve `uploadfs`: le impostazioni Wi-Fi,
 MQTT e gli eventuali codici RAW su LittleFS rimangono intatti. La dashboard
-a schede continua invece a essere servita da LittleFS e richiede la
-relativa procedura separata.
+a schede continua a essere servita da LittleFS, ma dalla **0.3.2**
+si aggiorna anche tramite OTA GitHub, senza `uploadfs`.
 
 ## Ricevitore IR G / R / Y (GND / 3V3 / D6)
 

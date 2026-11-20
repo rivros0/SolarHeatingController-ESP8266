@@ -15,7 +15,7 @@ Tutti gli endpoint, inclusi gli asset, richiedono HTTP Basic. Le mutazioni POST 
 | POST | `/api/reboot` | `{}`; richiede stato fisico confermato OFF |
 | GET / POST | `/update` | Pagina OTA / multipart firmware `.bin` |
 | POST | `/api/update-confirm-off` | `{"confirmed":true}`; registra la conferma fisica OFF prima di OTA, porta in Forza OFF senza inviare IR |
-| GET / POST | `/api/github-update` | Consulta release `firmware-stable` / installa dopo conferma OFF |
+| GET / POST | `/api/github-update` | Controlla e aggiorna separatamente firmware e asset web statici verificati SHA256, dopo conferma OFF |
 
 Risposte: 400 richiesta/config non valida; 401 autenticazione; 403 token; 409 stato/procedura incompatibile; 413 corpo eccessivo; 503 configurazione/memoria non disponibile; 507 scrittura configurazione fallita.
 
@@ -36,11 +36,42 @@ La conferma vale solo finche' il controller rimane in esecuzione;
 dopo ogni riavvio lo stato fisico torna sconosciuto.
 
 **Distribuzione:** il sorgente del popup e' in `data/update.html`
-ma la pagina `/update` e' servita direttamente dal firmware **0.3.1**
-(PROGMEM generato nello step pre-build). Il **solo flash USB di firmware.bin**
-aggiorna anche il popup senza modificare LittleFS e senza perdere
-credenziali o file IR RAW. La dashboard principale resta su LittleFS
-ed e' aggiornata separatamente.
+e dalla versione 0.3.1 la pagina `/update` e' servita direttamente
+dal firmware (PROGMEM generato nello step pre-build). Il flash USB
+aggiorna la pagina OTA senza modificare LittleFS. Dalla **0.3.2**
+la dashboard principale resta su LittleFS, ma e' aggiornabile
+**anche dalla funzione OTA GitHub** conservando dati privati.
+
+## Aggiornamento OTA incrementale (firmware 0.3.2)
+
+`GET /api/github-update` restituisce `checked`, `version`,
+`installed`, `board`, `size` e i nuovi campi:
+
+| Campo | Significato |
+| --- | --- |
+| `available` | Nuovo firmware **oppure** nuovi asset web disponibili |
+| `firmwareAvailable` | Versione firmware della release superiore a quella locale |
+| `webSupported` | Manifest con metadati web completi |
+| `webAvailable` | Almeno uno dei tre file web differisce per dimensioni o SHA256 |
+| `webFilesToUpdate` | Numero di file da scaricare (0–3) |
+
+Dopo autenticazione e conferma OFF, `POST /api/github-update` esegue
+solo le operazioni necessarie e restituisce `installed`, `version`,
+`firmwareInstalled`, `webInstalled`, `rebooting`.
+
+L'OTA web modifica **esclusivamente** `/index.html`, `/app.js` e
+`/style.css`, con nomi fissati nel firmware. Il manifest contiene
+SHA256 e dimensioni, ma non impone percorsi locali arbitrari.
+L'installazione passa per file temporanei verificati prima della
+sostituzione: non formatta LittleFS e conserva credenziali e codici IR.
+Una perdita di alimentazione durante la promozione puo' richiedere di
+ripetere il controllo OTA per completare gli asset rimanenti.
+Una modifica della sola dashboard non obbliga a riavviare l'ESP8266.
+
+Il caricamento manuale `POST /update` resta limitato al firmware
+`.bin` e non aggiorna i file web. Per la prima installazione della
+versione 0.3.2 da firmware precedenti e' richiesto upload USB o
+OTA manuale del nuovo firmware.
 
 ## Configurazione
 

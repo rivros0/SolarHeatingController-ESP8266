@@ -14,6 +14,8 @@ jobs:
         run: node scripts/test_web_ui.mjs
       - name: Test etichette temporali grafici
         run: node scripts/test_chart_time.mjs
+      - name: Test OTA dashboard incrementale e sintassi pagina update
+        run: node scripts/test_ota_web.mjs
   firmware:
     runs-on: ubuntu-latest
     strategy:

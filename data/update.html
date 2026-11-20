@@ -10,34 +10,42 @@
 <main>
   <section class="panel">
     <p class="eyebrow">MANUTENZIONE DEL DISPOSITIVO</p>
-    <h1>Aggiornamento firmware</h1>
+    <h1>Aggiornamenti firmware e interfaccia</h1>
     <p>Prima di aggiornare, verifica personalmente che il climatizzatore sia
       <strong>fisicamente spento</strong>. Al momento dell'installazione comparirà
       un popup per confermarlo: non occorre tornare nella scheda Infrarossi.
       La conferma non invia comandi infrarossi e imposta la modalità sicura
-      Forza OFF. La configurazione LittleFS viene conservata; l'installazione
-      richiede alimentazione e connessione stabili.</p>
+      Forza OFF. L'aggiornamento GitHub conserva le credenziali Wi-Fi e MQTT,
+      le impostazioni e i codici IR acquisiti: non formatta LittleFS.
+      Sono necessari alimentazione e connessione stabili.</p>
     <a class="button secondary" href="/">Torna alla dashboard</a>
   </section>
 
   <section class="panel">
-    <h2>Direttamente da GitHub</h2>
-    <p>Canale <strong>firmware-stable</strong> dedicato alle versioni verificate del firmware.
-      Le release CAD non vengono considerate. Controllo HTTPS, versione, scheda,
-      dimensioni e checksum SHA256 prima dell'installazione.</p>
+    <h2>Aggiornamento completo da GitHub</h2>
+    <p>Canale <strong>firmware-stable</strong>: controlla separatamente il
+      <strong>firmware</strong> e i file della <strong>dashboard</strong>.
+      Installa soltanto ciò che è cambiato. L'interfaccia può aggiornarsi
+      anche se la versione del firmware è già quella corrente.
+      Tutti i download utilizzano HTTPS verificato e SHA-256.</p>
     <dl id="githubInfo"></dl>
     <div class="controls">
       <button id="checkGitHub" type="button">Verifica aggiornamenti</button>
-      <button id="installGitHub" type="button" disabled>Installa da GitHub</button>
+      <button id="installGitHub" type="button" disabled>Installa aggiornamenti da GitHub</button>
     </div>
     <p id="githubStatus" role="status" aria-live="polite"></p>
-    <small>L'ESP8266 necessita di DNS e accesso a Internet per questa funzione.
-      Il caricamento locale riportato di seguito continua a funzionare anche senza GitHub.</small>
+    <small>Gli aggiornamenti web sostituiscono esclusivamente
+      <code>index.html</code>, <code>app.js</code> e <code>style.css</code>.
+      Non vengono modificati i file di configurazione, le password o i codici IR.
+      L'ESP8266 necessita di DNS, NTP e accesso a Internet.
+      Il caricamento manuale sottostante non dipende da GitHub.</small>
   </section>
 
   <section class="panel">
-    <h2>Aggiornamento manuale da file .bin</h2>
-    <p>Carica esclusivamente il file <code>firmware.bin</code> compilato per la scheda corretta.
+    <h2>Aggiornamento manuale firmware .bin</h2>
+    <p>Carica esclusivamente il file <code>firmware.bin</code> compilato
+      per la scheda corretta. Questa modalità aggiorna <strong>solo il firmware</strong>.
+      Per aggiornare anche la dashboard utilizza il pulsante GitHub qui sopra.
       Non caricare <code>littlefs.bin</code> in questa pagina.</p>
     <form id="upload">
       <label>Firmware .bin
@@ -119,9 +127,27 @@ function showGitHubResult(info) {
   ];
 
   if(info.checked) {
-    rows.push(["Versione disponibile",info.version]);
-    rows.push(["Dimensioni",String(info.size)+" byte"]);
-    rows.push(["Aggiornamento",info.available?"Disponibile":"Nessuna nuova versione"]);
+    rows.push(["Versione firmware pubblicata",info.version]);
+    rows.push(["Dimensioni firmware",String(info.size)+" byte"]);
+    let firmwareStatus = "Aggiornato";
+    if(info.firmwareAvailable) {
+      firmwareStatus = "Nuova versione disponibile";
+    }
+    rows.push(["Firmware", firmwareStatus]);
+    if(info.webSupported) {
+      let webStatus = "Aggiornata";
+      if(info.webAvailable) {
+        webStatus = String(info.webFilesToUpdate) + " file da aggiornare";
+      }
+      rows.push(["Interfaccia web", webStatus]);
+    } else {
+      rows.push(["Interfaccia web", "Manifest precedente: verifica non disponibile"]);
+    }
+    let updateStatus = "Nessuno";
+    if(info.available) {
+      updateStatus = "Disponibili";
+    }
+    rows.push(["Aggiornamenti complessivi", updateStatus]);
   }
   for(const row of rows) {
     const label=document.createElement("dt");
@@ -151,7 +177,11 @@ document.getElementById("checkGitHub").onclick=async function() {
     }
     candidateAvailable=info.available;
     document.getElementById("installGitHub").disabled=!candidateAvailable;
-    result.textContent="Verifica completata.";
+    if(candidateAvailable) {
+      result.textContent="Verifica completata: sono disponibili aggiornamenti.";
+    } else {
+      result.textContent="Firmware e interfaccia web risultano già aggiornati.";
+    }
   } catch(error) {
     result.textContent=error.message;
   }
@@ -175,7 +205,7 @@ document.getElementById("installGitHub").onclick=async function() {
       return;
     }
 
-    result.textContent="Stato OFF confermato. Download e verifica in corso. Non spegnere l'ESP8266.";
+    result.textContent="Stato OFF confermato. Download e verifica firmware/dashboard in corso. Non spegnere l'ESP8266.";
     const response=await fetch("/api/github-update",{
       method:"POST",
       headers:{"X-CSRF-Token":state.csrf},
@@ -185,7 +215,18 @@ document.getElementById("installGitHub").onclick=async function() {
       throw new Error(await response.text());
     }
     const info=await response.json();
-    result.textContent="Firmware "+info.version+" installato. Riavvio in corso. Verificare la versione al rientro.";
+    if(info.firmwareInstalled && info.webInstalled) {
+      result.textContent="Firmware " + info.version +
+        " e interfaccia aggiornati. Riavvio in corso: riaprire la dashboard.";
+    } else if(info.firmwareInstalled) {
+      result.textContent="Firmware " + info.version +
+        " aggiornato. Riavvio in corso.";
+    } else if(info.webInstalled) {
+      result.textContent="Interfaccia web aggiornata senza riavviare il dispositivo. " +
+        "Torna alla dashboard e aggiorna la pagina (Ctrl+Shift+R).";
+    } else {
+      result.textContent="Nessun file da installare.";
+    }
   } catch(error) {
     result.textContent=error.message;
   } finally {
