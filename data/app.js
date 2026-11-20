@@ -773,7 +773,7 @@ document.querySelectorAll("[data-mode]").forEach(function(button) {
       // Auto e Forza ON richiedono uno stato fisico noto. Quando e'
       // sconosciuto proponiamo la verifica OFF direttamente qui.
       if((requestedMode === "auto" || requestedMode === "force_on") &&
-         state.commanded === "unknown") {
+         state.commanded !== "off" && state.commanded !== "on") {
         const accepted = await confirmPhysicalOffForAction(
           "Attivare la modalità " + requestedMode.toUpperCase()
         );
@@ -919,9 +919,10 @@ document.querySelectorAll("[data-learn]").forEach(function(button) {
       const action = button.dataset.learn;
 
       if(action === "baseline" || action === "save") {
-        const message = action === "baseline"
-          ? "Misurare il consumo di riferimento con climatizzatore spento"
-          : "Salvare l'apprendimento con climatizzatore spento";
+        let message = "Salvare l'apprendimento con climatizzatore spento";
+        if(action === "baseline") {
+          message = "Misurare il consumo di riferimento con climatizzatore spento";
+        }
 
         const accepted = await confirmPhysicalOffForAction(message);
         if(!accepted) {
