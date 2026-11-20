@@ -13,7 +13,7 @@
 #include <time.h>
 #include "environment_manager.h"
 using namespace solar;
-static const char* VERSION="0.3.2";
+static const char* VERSION="0.3.3";
 ESP8266WebServer web(80);
 AsyncMqttClient mqtt;
 Adafruit_SHT31 sht;
