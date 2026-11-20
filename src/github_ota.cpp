@@ -462,63 +462,29 @@ bool githubFirmwareInstall(const GithubFirmwareInfo& firmware,
     return false;
   }
 
-  BearSSL::HashSHA256 hash;
-  hash.begin();
-  WiFiClient* stream=http.getStreamPtr();
-  uint8_t buffer[512];
-  size_t received=0;
-  unsigned long lastActivity=millis();
-  unsigned long start=millis();
-  bool ok=true;
-
-  while(received<firmware.size) {
-    if(millis()-start>180000UL || millis()-lastActivity>15000UL) {
-      error="Timeout scaricamento firmware";
-      ok=false;
-      break;
-    }
-
-    size_t available=stream->available();
-    if(available==0) {
-      delay(10);
-      continue;
-    }
-    size_t count=available;
-    if(count>sizeof(buffer)) count=sizeof(buffer);
-    if(count>firmware.size-received) count=firmware.size-received;
-    int read=stream->readBytes(buffer,count);
-    if(read<=0 || stage.write(buffer,read)!=size_t(read)) {
-      error="Scrittura temporanea LittleFS fallita";
-      ok=false;
-      break;
-    }
-    hash.add(buffer,read);
-    received+=read;
-    lastActivity=millis();
-    yield();
-  }
+  // Il body e' letto dal layer HTTPClient anziche' dal TLS socket grezzo:
+  // questo gestisce correttamente i blocchi del protocollo HTTP.
+  const int downloaded = http.writeToStream(&stage);
   stage.flush();
   stage.close();
   http.end();
 
-  if(!ok || received!=firmware.size) {
+  if(downloaded < 0 || size_t(downloaded) != firmware.size) {
     removeTemp();
+    error = "Download firmware incompleto: attesi " + String(firmware.size) +
+            " byte, ricevuti/codice HTTP " + String(downloaded);
     return false;
   }
 
-  hash.end();
-  const uint8_t* digest=static_cast<const uint8_t*>(hash.hash());
-  char hex[65];
-  for(int i=0;i<32;i++) {
-    snprintf(hex+i*2,3,"%02x",digest[i]);
-  }
-  hex[64]=0;
-  if(!firmware.sha256.equalsIgnoreCase(String(hex))) {
+  // Calcola SHA256 sul file realmente scritto in LittleFS prima di avviare
+  // l'Updater. Il firmware non verra' mai programmato se la verifica fallisce.
+  if(!fileMatchesSha256(TEMP_FIRMWARE, firmware.size, firmware.sha256)) {
     removeTemp();
-    error="Checksum SHA256 NON valido: firmware rifiutato";
+    error = "SHA256 o dimensione firmware non valida: aggiornamento rifiutato";
     return false;
   }
 
+  uint8_t buffer[512];
   stage=LittleFS.open(TEMP_FIRMWARE,"r");
   if(!stage) {
     error="Riapertura file firmware fallita";
