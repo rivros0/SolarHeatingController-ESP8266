@@ -43,6 +43,12 @@
 
 <section class="tab-panel" id="tab-settings" role="tabpanel" aria-labelledby="tab-button-settings" hidden>
   <section class="panel"><div class="section-title"><h2>Configurazione</h2><button id="export" class="secondary">Esporta senza credenziali</button></div><p>Le modifiche diventano operative dopo il salvataggio e il riavvio. Quando occorre verificare lo spegnimento del climatizzatore, compare un <strong>popup direttamente durante l'operazione</strong>: non è necessario cambiare scheda. Le password vuote mantengono il valore esistente; per cancellare la password MQTT usa la casella dedicata.</p>
+<div class="controls">
+<button id="applySolarAssistantTopics" type="button" class="secondary">
+Applica profilo MQTT SolarAssistant (192.168.1.240)
+</button>
+</div>
+<p><small>Imposta automaticamente i sette topic rilevati sul tuo impianto, il broker MQTT e il segno di scarica delle batterie. Lascia invariate le credenziali e disabilita l'automazione. Prima di salvare richiede il popup di conferma OFF; per ricevere i dati occorre riavviare.</small></p>
 <p><strong>Assistenza umidità in HEAT:</strong> opzionale e disabilitata all'inizio. Quando l'umidità relativa supera la soglia, può richiedere riscaldamento soltanto sotto la temperatura massima e con surplus energetico sufficiente. Non è una modalità DRY: il riscaldamento non elimina l'acqua dall'aria.</p><form id="settings"><div id="fields" class="form-grid"></div><label><input type="checkbox" id="clearMqtt"> Cancella password MQTT</label><div class="controls"><button type="submit">Salva configurazione</button><button type="button" id="reboot" class="secondary">Riavvia e applica</button></div></form></section>
 </section>
 
