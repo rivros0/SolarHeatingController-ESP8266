@@ -179,7 +179,7 @@ dl("climate",[["Stato comandato",state.commanded],["Stato stimato",state.estimat
 dl("system",[["Indirizzo IP",state.localIp||"—"],["Assegnazione IP",state.staticIpEnabled?"Statico":"DHCP"],["Uptime",number(state.uptime)+" s"],["Heap libero",number(state.heap)+" byte"],["Spazio OTA",number(state.otaSpace)+" byte"],["Retained ignorati",state.retainedIgnored],["Messaggi rifiutati",state.mqttRejected],["Reset",state.resetReason],["Inverter",state.inverter||"—"]]);
 const l=state.learning;$("learnState").textContent=`Fase: ${l.stage} · Spento ${number(l.offW)} W · Acceso ${number(l.onW)} W · Dopo OFF ${number(l.offAfterW)} W · Avvio ${number(l.startupMs/1000)} s · Rumore ${number(l.noiseW)} W`;
 $("version").textContent="Firmware "+state.version;
-if(state.rebootNeeded)notice("Configurazione salvata. Conferma climatizzatore spento e riavvia per applicarla.");
+if(state.rebootNeeded)notice("Configurazione salvata. Premi «Riavvia e applica»: comparirà il popup per confermare lo spegnimento.");
 if(pollCount++%5===0) {
   historyCache = await api("/api/history");
   renderHistoryCharts();
@@ -714,12 +714,154 @@ function fields() {
     container.append(section);
   }
 }
-async function act(fn){try{await fn();notice("Operazione completata.");}catch(e){notice(e.message);}}
-document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>act(()=>api("/api/mode",{mode:b.dataset.mode})));
-$("settings").onsubmit=e=>{e.preventDefault();act(async()=>{const next=structuredClone(config);document.querySelectorAll("[data-path]").forEach(i=>{if(i.type==="password"&&!i.value)return;set(next,i.dataset.path,i.type==="checkbox"?i.checked:i.type==="number"?Number(i.value):i.value);});if($("clearMqtt").checked)next.mqttPassword="";await api("/api/config",next);});};
-$("reboot").onclick=()=>act(()=>api("/api/reboot",{}));
-$("export").onclick=()=>act(async()=>download("solar-config-redacted.json",await api("/api/config")));
-for(const[button,on]of[["confirmOff",false],["confirmOn",true]])$(button).onclick=()=>{if(confirm(`Confermi di aver osservato il climatizzatore fisicamente ${on?"acceso":"spento"}?`))act(()=>api("/api/ir",{action:"confirm_state",on,confirmed:true}));};
+// ============================================================================
+// CONFERMA OFF CONTESTUALE
+//
+// Ogni operazione che richiede il climatizzatore fisicamente spento mostra
+// direttamente un popup, senza dover cambiare scheda. L'utente puo' annullare
+// senza effettuare alcuna richiesta di modifica al dispositivo.
+//
+// Il browser non puo' verificare la condizione fisica del climatizzatore:
+// l'operatore deve averla effettivamente controllata prima di confermare.
+// Il firmware riceve una dichiarazione esplicita, autenticata e con CSRF.
+// NON viene trasmesso alcun comando infrarosso.
+// ============================================================================
+async function confirmPhysicalOffForAction(actionDescription) {
+  const accepted = window.confirm(
+    "CONFERMA STATO FISICO DEL CLIMATIZZATORE\\n\\n" +
+    "Operazione richiesta: " + actionDescription + "\\n\\n" +
+    "Hai verificato personalmente che il climatizzatore sia " +
+    "FISICAMENTE SPENTO?\\n\\n" +
+    "Premi OK solo dopo averlo controllato. " +
+    "Questa conferma non invia comandi infrarossi.\\n\\n" +
+    "Premi Annulla se il climatizzatore è acceso o non puoi verificarlo."
+  );
+
+  if(!accepted) {
+    notice("Operazione annullata: stato fisico OFF non confermato.");
+    return false;
+  }
+
+  const result = await api("/api/confirm-physical-off", {confirmed: true});
+  if(!result || result.commanded !== "off" || result.confirmed !== true) {
+    throw new Error("Il dispositivo non ha registrato lo stato fisico OFF.");
+  }
+
+  // Evita che un successivo click faccia riferimento a uno stato vecchio.
+  state.commanded = "off";
+  return true;
+}
+
+// Il valore false segnala una cancellazione volontaria dell'utente.
+// Tutte le altre azioni mantengono il feedback e la gestione errori originali.
+async function act(fn) {
+  try {
+    const result = await fn();
+    if(result !== false) {
+      notice("Operazione completata.");
+    }
+  } catch(error) {
+    notice(error.message);
+  }
+}
+
+document.querySelectorAll("[data-mode]").forEach(function(button) {
+  button.onclick = function() {
+    act(async function() {
+      const requestedMode = button.dataset.mode;
+
+      // Auto e Forza ON richiedono uno stato fisico noto. Quando e'
+      // sconosciuto proponiamo la verifica OFF direttamente qui.
+      if((requestedMode === "auto" || requestedMode === "force_on") &&
+         state.commanded === "unknown") {
+        const accepted = await confirmPhysicalOffForAction(
+          "Attivare la modalità " + requestedMode.toUpperCase()
+        );
+        if(!accepted) {
+          return false;
+        }
+      }
+
+      return await api("/api/mode", {mode: requestedMode});
+    });
+  };
+});
+
+$("settings").onsubmit = function(event) {
+  event.preventDefault();
+  act(async function() {
+    const next = structuredClone(config);
+
+    document.querySelectorAll("[data-path]").forEach(function(input) {
+      if(input.type === "password" && !input.value) {
+        return;
+      }
+
+      let value = input.value;
+      if(input.type === "checkbox") {
+        value = input.checked;
+      } else if(input.type === "number") {
+        value = Number(input.value);
+      }
+
+      set(next, input.dataset.path, value);
+    });
+
+    if($("clearMqtt").checked) {
+      next.mqttPassword = "";
+    }
+
+    const accepted = await confirmPhysicalOffForAction(
+      "Salvare la configurazione del controller"
+    );
+    if(!accepted) {
+      return false;
+    }
+
+    return await api("/api/config", next);
+  });
+};
+
+$("reboot").onclick = function() {
+  act(async function() {
+    const accepted = await confirmPhysicalOffForAction(
+      "Riavviare il controller e applicare la configurazione"
+    );
+    if(!accepted) {
+      return false;
+    }
+
+    return await api("/api/reboot", {});
+  });
+};
+
+$("export").onclick = function() {
+  act(async function() {
+    download("solar-config-redacted.json", await api("/api/config"));
+  });
+};
+
+$("confirmOff").onclick = function() {
+  act(async function() {
+    const accepted = await confirmPhysicalOffForAction(
+      "Confermare lo stato fisico OFF"
+    );
+    if(!accepted) {
+      return false;
+    }
+    return {};
+  });
+};
+
+$("confirmOn").onclick = function() {
+  if(window.confirm(
+    "Hai verificato personalmente che il climatizzatore sia FISICAMENTE ACCESO?"
+  )) {
+    act(function() {
+      return api("/api/ir", {action: "confirm_state", on: true, confirmed: true});
+    });
+  }
+};
 for(const[button,on]of[["irOn",true],["irOff",false]])$(button).onclick=()=>{const actual=$("actualState").value;if(actual==="unknown"){notice("Selezionare lo stato fisico osservato prima del test.");return;}if(confirm(`Confermi il climatizzatore fisicamente ${actual.toUpperCase()} e l’invio di un solo comando ${on?"ON HEAT":"OFF"}?`)){act(()=>api("/api/ir",{action:on?"on":"off",actualOn:actual==="on",confirmed:true}));$("actualState").value="unknown";}};
 // Una cattura e' un segnale ricevuto, non la conferma dello stato reale.
 // Il JSON RAW rimane consultabile per il collaudo senza perdere informazioni.
@@ -749,8 +891,64 @@ async function readIrCapture() {
 $("capture").onclick = function() {
   act(readIrCapture);
 };
-for(const[id,action]of[["saveOn","capture_on"],["saveOff","capture_off"]])$(id).onclick=()=>{if(confirm("Salvare questo segnale? Automazione e verifica IR verranno disabilitate. Il codice deve corrispondere alla funzione scelta sul telecomando originale."))act(()=>api("/api/ir",{action,confirmed:true}));};
-document.querySelectorAll("[data-learn]").forEach(b=>b.onclick=()=>{const action=b.dataset.learn;if(["on","off"].includes(action)&&!confirm(`Confermi stato fisico ${action==="on"?"SPENTO":"ACCESO"} e invio del comando ${action.toUpperCase()}?`))return;act(()=>api("/api/learn",{action,confirmed:true}));});
+// Salvataggio RAW: una sola conferma contestuale comprende sia lo stato
+// fisico OFF sia la conseguenza sui codici di automazione.
+for(const [buttonId, action] of [
+  ["saveOn", "capture_on"],
+  ["saveOff", "capture_off"]
+]) {
+  $(buttonId).onclick = function() {
+    act(async function() {
+      const accepted = await confirmPhysicalOffForAction(
+        "Salvare il codice infrarosso " + action +
+        ". La verifica IR e l'automazione saranno disabilitate fino al collaudo."
+      );
+      if(!accepted) {
+        return false;
+      }
+      return await api("/api/ir", {action, confirmed: true});
+    });
+  };
+}
+
+// L'apprendimento dei consumi conserva i passaggi precedenti.
+// Inizio riferimento e salvataggio finale richiedono ora OFF contestuale.
+document.querySelectorAll("[data-learn]").forEach(function(button) {
+  button.onclick = function() {
+    act(async function() {
+      const action = button.dataset.learn;
+
+      if(action === "baseline" || action === "save") {
+        const message = action === "baseline"
+          ? "Misurare il consumo di riferimento con climatizzatore spento"
+          : "Salvare l'apprendimento con climatizzatore spento";
+
+        const accepted = await confirmPhysicalOffForAction(message);
+        if(!accepted) {
+          return false;
+        }
+      }
+
+      if(action === "on" || action === "off") {
+        let expectedPhysicalState = "ACCESO";
+        if(action === "on") {
+          expectedPhysicalState = "SPENTO";
+        }
+        const accepted = window.confirm(
+          "Hai osservato il climatizzatore fisicamente " +
+          expectedPhysicalState + " prima di inviare il comando " +
+          action.toUpperCase() + "?"
+        );
+        if(!accepted) {
+          notice("Comando annullato: stato fisico non confermato.");
+          return false;
+        }
+      }
+
+      return await api("/api/learn", {action, confirmed: true});
+    });
+  };
+});
 async function diagnosticsRefresh(){diagnostics=await api("/api/diagnostics");$("topics").replaceChildren();for(const row of diagnostics.topics){const tr=document.createElement("tr");for(const value of[row.topic,row.value,number(row.ageMs/1000)+" s",row.retained?"Sì · ignorato":"No"]){const td=document.createElement("td");td.textContent=value;tr.append(td);}$("topics").append(tr);}$("events").textContent=diagnostics.events.map(e=>`${(e.atMs/1000).toFixed(0)}s  ${e.message}`).join("\n");}
 $("refreshDiagnostics").onclick=()=>act(diagnosticsRefresh);$("exportLogs").onclick=()=>act(async()=>download("solar-log.json",await api("/api/diagnostics")));
 initializeTabs();
