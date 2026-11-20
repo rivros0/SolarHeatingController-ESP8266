@@ -728,12 +728,12 @@ function fields() {
 // ============================================================================
 async function confirmPhysicalOffForAction(actionDescription) {
   const accepted = window.confirm(
-    "CONFERMA STATO FISICO DEL CLIMATIZZATORE\\n\\n" +
-    "Operazione richiesta: " + actionDescription + "\\n\\n" +
+    "CONFERMA STATO FISICO DEL CLIMATIZZATORE\n\n" +
+    "Operazione richiesta: " + actionDescription + "\n\n" +
     "Hai verificato personalmente che il climatizzatore sia " +
-    "FISICAMENTE SPENTO?\\n\\n" +
+    "FISICAMENTE SPENTO?\n\n" +
     "Premi OK solo dopo averlo controllato. " +
-    "Questa conferma non invia comandi infrarossi.\\n\\n" +
+    "Questa conferma non invia comandi infrarossi.\n\n" +
     "Premi Annulla se il climatizzatore è acceso o non puoi verificarlo."
   );
 
