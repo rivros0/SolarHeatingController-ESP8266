@@ -13,7 +13,7 @@
 #include <time.h>
 #include "environment_manager.h"
 using namespace solar;
-static const char* VERSION="0.3.3";
+static const char* VERSION="0.3.4";
 ESP8266WebServer web(80);
 AsyncMqttClient mqtt;
 Adafruit_SHT31 sht;
@@ -360,9 +360,48 @@ void setupRoutes() {
     if(!authenticated()) return;
     DynamicJsonDocument doc(6144); configJson(doc.to<JsonObject>(),false); jsonReply(doc);
   });
+  // ========================================================================
+  // CONFERMA STATO FISICO OFF - DISPONIBILE DA OGNI SCHEDA
+  //
+  // Il popup viene mostrato dal client nel contesto dell'azione scelta.
+  // Il backend registra soltanto quanto osservato dall'operatore:
+  // NON invia comandi IR e NON cambia autonomamente la modalita'.
+  // Le autorizzazioni dell'azione finale restano indipendenti.
+  // ========================================================================
+  web.on("/api/confirm-physical-off",HTTP_POST,[] {
+    if(!mutation()) return;
+    if(updateActive) {
+      web.send(409,"text/plain","Aggiornamento in corso: conferma non consentita.");
+      return;
+    }
+
+    StaticJsonDocument<128> document;
+    if(!body(document)) return;
+    if(!document["confirmed"].is<bool>() ||
+       !document["confirmed"].as<bool>()) {
+      web.send(400,"text/plain","Conferma fisica OFF esplicita obbligatoria.");
+      return;
+    }
+
+    infrared.known = true;
+    infrared.on = false;
+    manager.changed(false,millis());
+    logEvent("Stato fisico OFF confermato dall'operatore tramite popup");
+
+    StaticJsonDocument<128> result;
+    result["commanded"] = "off";
+    result["confirmed"] = true;
+    jsonReply(result);
+  });
+
   web.on("/api/config",HTTP_POST,[] {
     if(!mutation()) return;
-    if(infrared.known&&infrared.on) { web.send(409,"text/plain","Spegnere prima di modificare la configurazione"); return; }
+    // Non basta uno stato "sconosciuto": serve la conferma OFF in tempo reale
+    // acquisita tramite il popup per l'operazione di configurazione.
+    if(!infrared.known || infrared.on) {
+      web.send(409,"text/plain","Confermare il climatizzatore fisicamente spento.");
+      return;
+    }
     DynamicJsonDocument doc(6144); if(!body(doc)) return;
     Config next=cfg; String error;
     if(!parseConfig(doc.as<JsonObjectConst>(),next,error)) { web.send(400,"text/plain",error); return; }
@@ -408,7 +447,10 @@ void setupRoutes() {
     }
     if((action=="capture_on"||action=="capture_off") && confirmed) {
       if(rebootNeeded) { web.send(409,"text/plain","Applicare prima la configurazione salvata"); return; }
-      if(infrared.known&&infrared.on) { web.send(409,"text/plain","Spegnere prima di salvare codici"); return; }
+      if(!infrared.known || infrared.on) {
+        web.send(409,"text/plain","Confermare il climatizzatore fisicamente spento prima di salvare.");
+        return;
+      }
       if(!infrared.saveCapture(action=="capture_on")) { web.send(400,"text/plain","Nessuna acquisizione valida o errore flash"); return; }
       logEvent("Codice acquisito; verifica IR e automazione disabilitate"); web.send(200,"application/json","{}"); return;
     }
@@ -480,7 +522,7 @@ void setupRoutes() {
   });
   web.on("/api/reboot",HTTP_POST,[] {
     if(!mutation()) return;
-    if(!infrared.known||infrared.on) { web.send(409,"text/plain","Confermare climatizzatore fisicamente spento in diagnostica"); return; }
+    if(!infrared.known||infrared.on) { web.send(409,"text/plain","Confermare climatizzatore fisicamente spento nel popup del riavvio"); return; }
     rebootAt=millis()+1500; web.send(200,"application/json","{}");
   });
   // ======================================================================
@@ -806,7 +848,7 @@ void loop() {
     auto d=manager.evaluate(now,cfg.energy,energy,environment.temperature,mode,infrared.known&&infrared.on,
                             mqtt.connected()&&gridOk,ready,expired,environment.humidity);
     availableW=d.available;
-    if(!infrared.known) reason="Stato sconosciuto: confermare lo stato fisico in diagnostica";
+    if(!infrared.known) reason="Stato sconosciuto: confermare nel popup dell'operazione richiesta";
     else reason=d.reason;
     const bool safeUnknownOff=!infrared.known && infrared.automaticReady() && mode!=Mode::Diagnostic &&
       (d.critical || mode==Mode::ForceOff || (environment.temperature.valid && environment.temperature.value>=cfg.energy.tempOff));
