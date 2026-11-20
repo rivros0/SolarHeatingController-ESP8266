@@ -21,6 +21,9 @@
 // - Prima SHA256 su file temporaneo LittleFS, POI scrittura via Update.
 // - In caso di errore HTTP/hash il firmware in esecuzione resta intatto.
 // - La pagina OTA manuale /update resta indipendente e disponibile.
+// - Dashboard OTA: aggiorna solo tre file HTML/JS/CSS con SHA256 verificato.
+// - Non scarica mai una nuova immagine LittleFS, preservando credenziali
+//   Wi-Fi/MQTT, configurazione energetica e codici IR acquisiti.
 // ============================================================================
 namespace {
 const char* MANIFEST =
@@ -29,6 +32,28 @@ const char* RELEASE_URL =
   "https://github.com/rivros0/SolarHeatingController-ESP8266/releases/download/firmware-stable/";
 const char* TEMP_FIRMWARE = "/github-update.tmp";
 const char* FLASH_LAYOUT = "4m1m";
+
+// Elenco fisso: un manifest remoto non puo' decidere quali file modificare.
+// I nomi web-* coincidono con gli asset pubblicati nella release stabile.
+const char* WEB_NAMES[GITHUB_WEB_ASSET_COUNT] = {
+  "index.html",
+  "app.js",
+  "style.css"
+};
+const char* WEB_LOCAL[GITHUB_WEB_ASSET_COUNT] = {
+  "/index.html",
+  "/app.js",
+  "/style.css"
+};
+const char* WEB_TEMP[GITHUB_WEB_ASSET_COUNT] = {
+  "/.ota-index.tmp",
+  "/.ota-app.tmp",
+  "/.ota-style.tmp"
+};
+
+static const size_t MAX_WEB_FILE_BYTES = 131072;
+static const size_t MAX_WEB_TOTAL_BYTES = 196608;
+static const size_t WEB_FS_MARGIN_BYTES = 16384;
 
 bool networkReady(String& error) {
   if(WiFi.status()!=WL_CONNECTED) {
@@ -95,6 +120,176 @@ void removeTemp() {
     LittleFS.remove(TEMP_FIRMWARE);
   }
 }
+
+// ---------------------------------------------------------------------------
+// SHA256 in streaming su file locali: non carica la dashboard in RAM.
+// Il confronto del contenuto reale consente di recuperare automaticamente
+// un update interrotto e rilevare web app datate dopo uploadfs.
+// ---------------------------------------------------------------------------
+String hexDigest(const uint8_t* digest) {
+  char hex[65];
+  for(size_t index = 0; index < 32; index++) {
+    snprintf(hex + index * 2, 3, "%02x", digest[index]);
+  }
+  hex[64] = 0;
+  return String(hex);
+}
+
+bool webFileMatches(size_t index, size_t expectedSize, const String& sha) {
+  File input = LittleFS.open(WEB_LOCAL[index], "r");
+  if(!input) {
+    return false;
+  }
+
+  if(input.size() != expectedSize) {
+    input.close();
+    return false;
+  }
+
+  BearSSL::HashSHA256 hash;
+  hash.begin();
+
+  uint8_t buffer[512];
+  size_t remaining = expectedSize;
+  while(remaining > 0) {
+    size_t readCount = remaining;
+    if(readCount > sizeof(buffer)) {
+      readCount = sizeof(buffer);
+    }
+
+    const int received = input.read(buffer, readCount);
+    if(received <= 0) {
+      input.close();
+      return false;
+    }
+
+    hash.add(buffer, received);
+    remaining -= size_t(received);
+    yield();
+  }
+
+  input.close();
+  hash.end();
+  const uint8_t* digest = static_cast<const uint8_t*>(hash.hash());
+  return sha.equalsIgnoreCase(hexDigest(digest));
+}
+
+// ---------------------------------------------------------------------------
+// Scarica un asset web interamente in un file temporaneo, controllando
+// dimensioni e SHA256. In caso di errore, il file pubblicato non cambia.
+// TLS rimane verificato come per l'OTA del firmware.
+// ---------------------------------------------------------------------------
+bool downloadVerifiedWebAsset(size_t index,
+                              const GithubWebAssetInfo& asset,
+                              String& error) {
+  const String url = String(RELEASE_URL) + "web-" + WEB_NAMES[index];
+
+  BearSSL::X509List roots(GH_TLS_CA_PEM);
+  if(roots.getCount() == 0) {
+    error = "Certificati HTTPS CA assenti";
+    return false;
+  }
+
+  BearSSL::WiFiClientSecure client;
+  HTTPClient http;
+  if(!newHttpClient(client, roots, http, url, error)) {
+    return false;
+  }
+
+  int status = http.GET();
+  if(status != HTTP_CODE_OK) {
+    error = "Download asset web non disponibile: " +
+      String(WEB_NAMES[index]) + " HTTP " + String(status);
+    http.end();
+    return false;
+  }
+
+  const int reported = http.getSize();
+  if(reported < 0 || size_t(reported) != asset.size) {
+    error = "Dimensione asset web difforme: " + String(WEB_NAMES[index]);
+    http.end();
+    return false;
+  }
+
+  File stage = LittleFS.open(WEB_TEMP[index], "w");
+  if(!stage) {
+    error = "Impossibile creare il file temporaneo: " +
+      String(WEB_NAMES[index]);
+    http.end();
+    return false;
+  }
+
+  BearSSL::HashSHA256 hash;
+  hash.begin();
+  WiFiClient* stream = http.getStreamPtr();
+
+  uint8_t buffer[512];
+  size_t received = 0;
+  unsigned long started = millis();
+  unsigned long lastActivity = started;
+  bool writeSucceeded = true;
+
+  while(received < asset.size) {
+    const unsigned long now = millis();
+    if(now - started > 120000UL || now - lastActivity > 15000UL) {
+      error = "Timeout durante il download: " + String(WEB_NAMES[index]);
+      writeSucceeded = false;
+      break;
+    }
+
+    size_t available = stream->available();
+    if(available == 0) {
+      delay(10);
+      continue;
+    }
+
+    size_t count = available;
+    if(count > sizeof(buffer)) {
+      count = sizeof(buffer);
+    }
+    if(count > asset.size - received) {
+      count = asset.size - received;
+    }
+
+    const int bytesRead = stream->readBytes(buffer, count);
+    if(bytesRead <= 0) {
+      error = "Lettura HTTPS fallita: " + String(WEB_NAMES[index]);
+      writeSucceeded = false;
+      break;
+    }
+
+    if(stage.write(buffer, size_t(bytesRead)) != size_t(bytesRead)) {
+      error = "Scrittura LittleFS fallita: " + String(WEB_NAMES[index]);
+      writeSucceeded = false;
+      break;
+    }
+
+    hash.add(buffer, bytesRead);
+    received += size_t(bytesRead);
+    lastActivity = millis();
+    yield();
+  }
+
+  stage.flush();
+  stage.close();
+  http.end();
+
+  if(!writeSucceeded || received != asset.size) {
+    LittleFS.remove(WEB_TEMP[index]);
+    return false;
+  }
+
+  hash.end();
+  const uint8_t* digest = static_cast<const uint8_t*>(hash.hash());
+  if(!asset.sha256.equalsIgnoreCase(hexDigest(digest))) {
+    LittleFS.remove(WEB_TEMP[index]);
+    error = "SHA256 errato: " + String(WEB_NAMES[index]);
+    return false;
+  }
+
+  return true;
+}
+
 }
 
 const char* githubFirmwareBoard() {
