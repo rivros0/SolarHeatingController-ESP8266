@@ -11,6 +11,7 @@ on:
       - 'data/**'
       - 'platformio.ini'
       - 'scripts/prepare_tls_certs.py'
+      - 'scripts/embed_update_page.py'
       - '.github/workflows/firmware-release.yml'
 
 permissions:
@@ -50,6 +51,11 @@ jobs:
           pio run -e d1_mini
           test -s .pio/build/d1_mini/firmware.bin
           cp .pio/build/d1_mini/firmware.bin dist/firmware/firmware-d1_mini.bin
+          # Copia soltanto i file pubblici della dashboard.
+          # config.json, password e codici IR non fanno parte della release.
+          cp data/index.html dist/firmware/web-index.html
+          cp data/app.js dist/firmware/web-app.js
+          cp data/style.css dist/firmware/web-style.css
 
       - name: Copia e prepara manifest con SHA256
         shell: bash
@@ -68,7 +74,12 @@ jobs:
           match = re.search(r'VERSION\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"', main)
           if match is None:
               raise SystemExit("VERSION non valida o assente")
-          release = {"version": match.group(1), "layout": "4m1m", "boards": {}}
+          release = {
+              "version": match.group(1),
+              "layout": "4m1m",
+              "boards": {},
+              "web": {},
+          }
           for board in ("nodemcuv2", "d1_mini"):
               path = Path("dist/firmware") / ("firmware-" + board + ".bin")
               payload = path.read_bytes()
@@ -76,6 +87,16 @@ jobs:
                   "size": len(payload),
                   "sha256": hashlib.sha256(payload).hexdigest(),
               }
+          # Il manifest web e' indipendente dalla versione firmware.
+          # Ogni update UI-only genera hash diversi senza forzare firmware OTA.
+          for filename in ("index.html", "app.js", "style.css"):
+              path = Path("data") / filename
+              payload = path.read_bytes()
+              release["web"][filename] = {
+                  "size": len(payload),
+                  "sha256": hashlib.sha256(payload).hexdigest(),
+              }
+
           Path("firmware/stable.json").write_text(
               json.dumps(release, indent=2) + "\n", encoding="utf-8"
           )
@@ -88,10 +109,11 @@ jobs:
           name: solar-firmware-stable
           path: |
             dist/firmware/*.bin
+            dist/firmware/web-*
             firmware/stable.json
           if-no-files-found: error
 
-      - name: Pubblica soltanto firmware nella release firmware-stable
+      - name: Pubblica firmware e dashboard pubblica nella release firmware-stable
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -99,12 +121,22 @@ jobs:
           set -euo pipefail
           TAG="firmware-stable"
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" dist/firmware/firmware-nodemcuv2.bin dist/firmware/firmware-d1_mini.bin --clobber
+            gh release upload "$TAG" \
+              dist/firmware/firmware-nodemcuv2.bin \
+              dist/firmware/firmware-d1_mini.bin \
+              dist/firmware/web-index.html \
+              dist/firmware/web-app.js \
+              dist/firmware/web-style.css --clobber
           else
-            gh release create "$TAG" dist/firmware/firmware-nodemcuv2.bin dist/firmware/firmware-d1_mini.bin \
+            gh release create "$TAG" \
+              dist/firmware/firmware-nodemcuv2.bin \
+              dist/firmware/firmware-d1_mini.bin \
+              dist/firmware/web-index.html \
+              dist/firmware/web-app.js \
+              dist/firmware/web-style.css \
               --target "$GITHUB_SHA" \
-              --title "SolarHeating Controller - Firmware stabile" \
-              --notes "Firmware per NodeMCU e D1 Mini. I file .bin sono aggiornabili dall'interfaccia web dell'ESP8266. Il contenitore CAD usa una release separata."
+              --title "SolarHeating Controller - Firmware e dashboard stabili" \
+              --notes "Firmware NodeMCU/D1 Mini e tre asset web verificati SHA256. Il controller aggiorna solo i file web pubblici e conserva configurazione e codici IR. Il contenitore CAD usa una release separata."
           fi
 
       - name: Aggiorna indice HTTPS con checksum dopo la pubblicazione degli asset
