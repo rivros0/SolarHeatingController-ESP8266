@@ -2,7 +2,7 @@
 
 Controller locale per usare il surplus fotovoltaico nel riscaldamento di un climatizzatore Hisense, mantenendo priorità ai carichi domestici e alla ricarica batterie. Firmware Arduino per **NodeMCU ESP8266 e Wemos D1 Mini da 4 MB**, dashboard HTML/CSS/JS su LittleFS, SolarAssistant via MQTT, SHT31 e IRremoteESP8266. Nessun servizio cloud necessario.
 
-**Versione 0.3.4 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
+**Versione 0.3.5 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
 
 ## Funzioni
 
@@ -42,6 +42,47 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 9. Per verificare nuovi firmware direttamente da GitHub apri `/update`, consulta il canale firmware-stable e scegli l'installazione. Vedere [OTA.md](docs/OTA.md).
 
 Al riavvio il controller entra sempre in **Forza OFF con stato fisico sconosciuto**. Non invia un toggle e non presume che il climatizzatore sia spento. Se dispone già di codici discreti verificati, Forza OFF o una protezione possono inviare un unico OFF preventivo anche da stato sconosciuto. L'ultima modalità richiesta è salvata a fini diagnostici; la ripartenza automatica dopo un reset richiede una nuova conferma fisica o un comando OFF discreto. Questa scelta evita avvii e inversioni inattesi dopo OTA o interruzioni di alimentazione.
+
+## Profilo MQTT SolarAssistant dell'impianto domestico (v0.3.5)
+
+Sono state verificate le pubblicazioni live del broker MQTT
+`192.168.1.240:1883`. La scheda **Configurazione** include ora il pulsante
+**Applica profilo MQTT SolarAssistant (192.168.1.240)**:
+
+| Parametro | Topic verificato nel log MQTT |
+| --- | --- |
+| Produzione FV | `solar_assistant/inverter_1/pv_power/state` |
+| Carico abitazione | `solar_assistant/inverter_1/load_power/state` |
+| Potenza batteria | `solar_assistant/total/battery_power/state` |
+| Tensione batteria | `solar_assistant/battery_1/voltage/state` |
+| Corrente batteria | `solar_assistant/battery_1/current/state` |
+| SOC batteria | `solar_assistant/total/battery_state_of_charge/state` |
+| Stato inverter | `solar_assistant/inverter_1/device_mode/state` |
+| Import ed export | Non associati: `grid_power` e' una sola misura da interpretare |
+
+Per le batterie **potenza e corrente negative indicano scarica**:
+il profilo disabilita le opzioni `negativeCharge` e
+`negativeCurrentCharge`. L'automazione viene sempre **disabilitata**
+al momento dell'applicazione e dovra' essere riabilitata soltanto
+dopo la verifica di telemetria e protezioni.
+
+Il pulsante salva il profilo sul dispositivo passando per un popup
+che richiede l'accertamento fisico dello stato OFF. Le credenziali
+Wi-Fi/MQTT, l'utente amministratore, le impostazioni IR e tutte le altre
+soglie rimangono invariate. **Premere quindi «Riavvia e applica»**
+per effettuare le nuove sottoscrizioni MQTT.
+
+Anche un dispositivo senza configurazione precedente usa questi
+topic come valori iniziali. Le configurazioni gia' salvate su
+LittleFS **non vengono sovrascritte** dall'aggiornamento del
+firmware: per correggere i topic gia' persistenti bisogna
+premere il pulsante esplicito della dashboard.
+
+**Aggiornamento da 0.3.4:** aprire `/update`,
+verificare aggiornamenti GitHub e installare sia firmware sia file web,
+senza `uploadfs`. In alternativa usare USB per il solo firmware e
+GitHub OTA per la pagina web. Verificare poi `/api/state`, scheda
+Diagnostica e i valori reali prima di attivare l'automazione.
 
 ## Conferma fisica OFF contestuale (v0.3.4)
 
