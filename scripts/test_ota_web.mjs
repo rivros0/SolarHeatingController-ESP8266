@@ -100,6 +100,52 @@ assert.ok(
   "Conferma fisica OFF obbligatoria lato firmware."
 );
 
+// ============================================================================
+// REGRESSIONE BUG MANIFEST: non passare piu' il socket HTTPS grezzo al parser.
+// Tutte e tre le risorse (manifest, firmware e dashboard) devono usare
+// HTTPClient per verificare l'intero corpo della risposta.
+// ============================================================================
+assert.ok(
+  !cpp.includes("deserializeJson(doc,http.getStream()"),
+  "Il manifest non deve essere letto dal flusso TLS senza framing HTTP."
+);
+assert.ok(
+  cpp.includes("http.writeToStream(&payload)"),
+  "Il manifest deve essere letto attraverso HTTPClient."
+);
+assert.ok(
+  cpp.includes("downloaded != length"),
+  "La dimensione del manifest ricevuto deve coincidere con Content-Length."
+);
+assert.ok(
+  cpp.includes("parseError.c_str()"),
+  "Gli errori JSON devono riportare la causa diagnostica."
+);
+assert.ok(
+  cpp.includes("http.writeToStream(&stage)"),
+  "Download del firmware e asset web devono usare la gestione HTTP completa."
+);
+const completeTransfers = cpp.split("http.writeToStream(&stage)").length - 1;
+assert.equal(
+  completeTransfers,
+  2,
+  "Sono attesi due trasferimenti staging: web asset e firmware."
+);
+assert.ok(
+  cpp.includes("fileMatchesSha256(WEB_TEMP[index]"),
+  "Prima della promozione OTA va verificato l'hash del file web su flash."
+);
+assert.ok(
+  cpp.includes("fileMatchesSha256(TEMP_FIRMWARE"),
+  "Prima della scrittura U_FLASH va verificato l'hash del firmware staged."
+);
+
+const manifest = JSON.parse(readFileSync("firmware/stable.json", "utf8"));
+assert.ok(manifest.boards.nodemcuv2, "Manifest firmware NodeMCU assente.");
+for(const filename of webFiles) {
+  assert.ok(manifest.web[filename], "Manifest web assente: " + filename);
+}
+
 // Estraiamo lo script della pagina /update e lo compiliamo con Node.js.
 // Rileva errori di sintassi anche quando il firmware ESP8266 compila.
 const match = update.match(/<script>([\s\S]*?)<\/script>/);
