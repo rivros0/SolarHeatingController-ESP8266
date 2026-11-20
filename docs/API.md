@@ -14,10 +14,31 @@ Tutti gli endpoint, inclusi gli asset, richiedono HTTP Basic. Le mutazioni POST 
 | POST | `/api/learn` | Apprendimento: `baseline`, `on`, `off`, `save`, `cancel` |
 | POST | `/api/reboot` | `{}`; richiede stato fisico confermato OFF |
 | GET / POST | `/update` | Pagina OTA / multipart firmware `.bin` |
+| POST | `/api/confirm-physical-off` | `{"confirmed":true}`; conferma OFF generale da popup in qualsiasi scheda, senza inviare IR né cambiare modalità |
 | POST | `/api/update-confirm-off` | `{"confirmed":true}`; registra la conferma fisica OFF prima di OTA, porta in Forza OFF senza inviare IR |
 | GET / POST | `/api/github-update` | Controlla e aggiorna separatamente firmware e asset web statici verificati SHA256, dopo conferma OFF |
 
 Risposte: 400 richiesta/config non valida; 401 autenticazione; 403 token; 409 stato/procedura incompatibile; 413 corpo eccessivo; 503 configurazione/memoria non disponibile; 507 scrittura configurazione fallita.
+
+## Conferma OFF contestuale, senza cambio scheda (v0.3.4)
+
+Quando l'utente preme un pulsante che richiede stato fisico OFF,
+il frontend propone immediatamente un popup contestuale.
+Dopo consenso esplicito invia
+`POST /api/confirm-physical-off` con
+`{"confirmed":true}`, HTTP Basic e header CSRF come per tutte
+le mutazioni. La risposta e' `{"commanded":"off","confirmed":true}`.
+Il server registra che l'operatore ha osservato lo stato fisico OFF;
+**non effettua misure indipendenti e non invia IR**.
+L'endpoint non e' disponibile durante un aggiornamento OTA in corso.
+
+La cancellazione del popup non genera POST e non avvia l'operazione.
+Gli endpoint di reboot, configurazione, salvataggio RAW e modalita'
+conservano ciascuno le proprie verifiche lato server: una dichiarazione
+OFF non rende automaticamente leciti comandi con IR non verificato,
+modalita' non consentite o dati energetici non sicuri. La conferma
+OTA preesistente continua a usare `/api/update-confirm-off`, che
+passa anche in ForceOff.
 
 ## Conferma fisica prima dell'aggiornamento OTA
 
