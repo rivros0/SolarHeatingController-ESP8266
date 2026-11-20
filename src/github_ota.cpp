@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
+#include <StreamString.h>
 #include <WiFiClientSecureBearSSL.h>
 #include <LittleFS.h>
 #include <Updater.h>
@@ -340,11 +341,47 @@ bool githubFirmwareCheck(const char* installedVersion,
     return false;
   }
 
-  DynamicJsonDocument doc(6144);
-  DeserializationError parseError=deserializeJson(doc,http.getStream(),DeserializationOption::NestingLimit(6));
+  // ========================================================================
+  // LETTURA MANIFEST ROBUSTA
+  //
+  // IMPORTANTE: http.getStream() espone il WiFiClient grezzo, non il body
+  // decodificato dall'HTTPClient. ArduinoJson puo' quindi ricevere byte
+  // parziali o chunk HTTP e restituire IncompleteInput/InvalidInput.
+  //
+  // HTTPClient::writeToStream gestisce Content-Length, chunked transfer,
+  // timeout e connessioni interrotte. Interpretiamo JSON SOLO dopo avere
+  // verificato la ricezione di tutti i byte promessi dal server.
+  // ========================================================================
+  StreamString payload;
+  if(!payload.reserve(size_t(length) + 1)) {
+    error="Memoria insufficiente per il manifest GitHub";
+    http.end();
+    return false;
+  }
+
+  const int downloaded=http.writeToStream(&payload);
   http.end();
+
+  if(downloaded < 0) {
+    error="Ricezione HTTP manifest fallita (codice "+String(downloaded)+")";
+    Serial.println(String("[OTA] ") + error);
+    return false;
+  }
+  if(downloaded != length || payload.length() != size_t(length)) {
+    error="Manifest HTTP incompleto: attesi "+String(length)+
+          " byte, ricevuti "+String(payload.length());
+    Serial.println(String("[OTA] ") + error);
+    return false;
+  }
+
+  DynamicJsonDocument doc(6144);
+  DeserializationError parseError=deserializeJson(
+    doc, payload.c_str(), DeserializationOption::NestingLimit(6)
+  );
   if(parseError || !doc.is<JsonObject>()) {
-    error="Manifest firmware JSON non valido";
+    error="Manifest firmware JSON non valido (ArduinoJson: "+
+          String(parseError.c_str())+", byte="+String(payload.length())+")";
+    Serial.println(String("[OTA] ") + error);
     return false;
   }
 
