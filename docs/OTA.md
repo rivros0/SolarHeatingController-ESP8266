@@ -27,6 +27,26 @@ file già presenti in LittleFS: non si affida a un numero di versione web
 salvato nel filesystem. Questo permette di individuare una pagina obsoleta
 dopo una reinstallazione o un download interrotto.
 
+## Ripristino del controllo manifest (versione 0.3.3)
+
+Se la 0.3.2 segnala **"Manifest firmware JSON non valido"** prima
+di abilitare il pulsante GitHub, il problema e' nella precedente
+lettura HTTP del JSON. Il file pubblicato puo' essere valido e il
+trasferimento parziale o il framing HTTP non interpretato correttamente.
+
+La 0.3.3 riceve l'intero corpo usando HTTPClient, controlla il numero
+di byte e riporta una diagnostica distinta per errori HTTP o parser.
+Anche i binari vengono letti tramite HTTPClient e verificati contro
+SHA256 dei file temporanei realmente scritti su LittleFS.
+
+**Procedura di recupero:** programmare la 0.3.3 via USB o upload
+manuale `.bin` sulla pagina `/update`. Questa operazione non
+modifica LittleFS. Dopo il riavvio selezionare **Verifica aggiornamenti**
+e **Installa aggiornamenti da GitHub** per aggiornare selettivamente
+`index.html`, `app.js` e `style.css`. Una connessione Wi-Fi scarsa
+puo' ancora causare timeout o trasferimenti incompleti, che ora
+vengono rifiutati senza installare file parziali.
+
 ## Prima attivazione del nuovo sistema OTA (da 0.3.1 a 0.3.2)
 
 La versione 0.3.1 sa gia' aggiornare il firmware dal canale
