@@ -129,24 +129,25 @@ function showGitHubResult(info) {
   if(info.checked) {
     rows.push(["Versione firmware pubblicata",info.version]);
     rows.push(["Dimensioni firmware",String(info.size)+" byte"]);
-    rows.push([
-      "Firmware",
-      info.firmwareAvailable ? "Nuova versione disponibile" : "Aggiornato"
-    ]);
+    let firmwareStatus = "Aggiornato";
+    if(info.firmwareAvailable) {
+      firmwareStatus = "Nuova versione disponibile";
+    }
+    rows.push(["Firmware", firmwareStatus]);
     if(info.webSupported) {
-      rows.push([
-        "Interfaccia web",
-        info.webAvailable ?
-          String(info.webFilesToUpdate) + " file da aggiornare" :
-          "Aggiornata"
-      ]);
+      let webStatus = "Aggiornata";
+      if(info.webAvailable) {
+        webStatus = String(info.webFilesToUpdate) + " file da aggiornare";
+      }
+      rows.push(["Interfaccia web", webStatus]);
     } else {
       rows.push(["Interfaccia web", "Manifest precedente: verifica non disponibile"]);
     }
-    rows.push([
-      "Aggiornamenti complessivi",
-      info.available ? "Disponibili" : "Nessuno"
-    ]);
+    let updateStatus = "Nessuno";
+    if(info.available) {
+      updateStatus = "Disponibili";
+    }
+    rows.push(["Aggiornamenti complessivi", updateStatus]);
   }
   for(const row of rows) {
     const label=document.createElement("dt");
