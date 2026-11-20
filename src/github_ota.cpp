@@ -292,6 +292,10 @@ bool downloadVerifiedWebAsset(size_t index,
 
 }
 
+bool githubAnythingAvailable(const GithubFirmwareInfo& info) {
+  return info.available || info.webAvailable;
+}
+
 const char* githubFirmwareBoard() {
 #if defined(SOLAR_BOARD_NODEMCU)
   return "nodemcuv2";
