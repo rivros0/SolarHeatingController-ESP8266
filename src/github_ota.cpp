@@ -136,8 +136,8 @@ String hexDigest(const uint8_t* digest) {
   return String(hex);
 }
 
-bool webFileMatches(size_t index, size_t expectedSize, const String& sha) {
-  File input = LittleFS.open(WEB_LOCAL[index], "r");
+bool fileMatchesSha256(const char* path, size_t expectedSize, const String& sha) {
+  File input = LittleFS.open(path, "r");
   if(!input) {
     return false;
   }
@@ -173,6 +173,10 @@ bool webFileMatches(size_t index, size_t expectedSize, const String& sha) {
   hash.end();
   const uint8_t* digest = static_cast<const uint8_t*>(hash.hash());
   return sha.equalsIgnoreCase(hexDigest(digest));
+}
+
+bool webFileMatches(size_t index, size_t expectedSize, const String& sha) {
+  return fileMatchesSha256(WEB_LOCAL[index], expectedSize, sha);
 }
 
 // ---------------------------------------------------------------------------
@@ -220,71 +224,27 @@ bool downloadVerifiedWebAsset(size_t index,
     return false;
   }
 
-  BearSSL::HashSHA256 hash;
-  hash.begin();
-  WiFiClient* stream = http.getStreamPtr();
-
-  uint8_t buffer[512];
-  size_t received = 0;
-  unsigned long started = millis();
-  unsigned long lastActivity = started;
-  bool writeSucceeded = true;
-
-  while(received < asset.size) {
-    const unsigned long now = millis();
-    if(now - started > 120000UL || now - lastActivity > 15000UL) {
-      error = "Timeout durante il download: " + String(WEB_NAMES[index]);
-      writeSucceeded = false;
-      break;
-    }
-
-    size_t available = stream->available();
-    if(available == 0) {
-      delay(10);
-      continue;
-    }
-
-    size_t count = available;
-    if(count > sizeof(buffer)) {
-      count = sizeof(buffer);
-    }
-    if(count > asset.size - received) {
-      count = asset.size - received;
-    }
-
-    const int bytesRead = stream->readBytes(buffer, count);
-    if(bytesRead <= 0) {
-      error = "Lettura HTTPS fallita: " + String(WEB_NAMES[index]);
-      writeSucceeded = false;
-      break;
-    }
-
-    if(stage.write(buffer, size_t(bytesRead)) != size_t(bytesRead)) {
-      error = "Scrittura LittleFS fallita: " + String(WEB_NAMES[index]);
-      writeSucceeded = false;
-      break;
-    }
-
-    hash.add(buffer, bytesRead);
-    received += size_t(bytesRead);
-    lastActivity = millis();
-    yield();
-  }
-
+  // HTTPClient trasferisce e decodifica il body completo (Content-Length
+  // o chunked) prima della verifica. Non leggere il WiFiClient grezzo:
+  // eventuali delimitatori HTTP provocherebbero falsi checksum.
+  const int transferred = http.writeToStream(&stage);
   stage.flush();
   stage.close();
   http.end();
 
-  if(!writeSucceeded || received != asset.size) {
+  if(transferred < 0 || size_t(transferred) != asset.size) {
     LittleFS.remove(WEB_TEMP[index]);
+    error = "Download web incompleto: " + String(WEB_NAMES[index]) +
+      " (HTTP " + String(transferred) + " byte, attesi " +
+      String(asset.size) + ")";
     return false;
   }
 
-  hash.end();
-  const uint8_t* digest = static_cast<const uint8_t*>(hash.hash());
-  if(!asset.sha256.equalsIgnoreCase(hexDigest(digest))) {
+  // Il file verificato e' quello realmente salvato nella flash,
+  // non un hash calcolato su dati eventualmente persi in scrittura.
+  if(!fileMatchesSha256(WEB_TEMP[index], asset.size, asset.sha256)) {
     LittleFS.remove(WEB_TEMP[index]);
-    error = "SHA256 errato: " + String(WEB_NAMES[index]);
+    error = "SHA256 o dimensione errata: " + String(WEB_NAMES[index]);
     return false;
   }
 
