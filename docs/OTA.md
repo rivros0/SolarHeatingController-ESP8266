@@ -27,6 +27,20 @@ file già presenti in LittleFS: non si affida a un numero di versione web
 salvato nel filesystem. Questo permette di individuare una pagina obsoleta
 dopo una reinstallazione o un download interrotto.
 
+## Prima attivazione del nuovo sistema OTA (da 0.3.1 a 0.3.2)
+
+La versione 0.3.1 sa gia' aggiornare il firmware dal canale
+`firmware-stable`, ma non conosce ancora gli asset web. Il primo
+aggiornamento richiede quindi **due passaggi** se si utilizza la rete:
+
+1. sulla 0.3.1, verificare e installare il firmware **0.3.2** da GitHub;
+2. dopo il riavvio, riaprire `/update`, verificare nuovamente e
+   aggiornare i file della dashboard mediante la nuova funzione.
+
+In alternativa, caricare la 0.3.2 via USB o con upload manuale `.bin`,
+poi usare GitHub OTA per la dashboard. Nessuna delle due procedure
+richiede `uploadfs`. Con Wi-Fi instabile, preferire USB per il firmware.
+
 ## Aggiornamento completo da GitHub
 
 1. Assicurarsi che climatizzatore e impianto siano in condizioni sicure.

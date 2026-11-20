@@ -62,13 +62,17 @@ Non viene caricato `littlefs.bin` e non avviene alcuna formattazione:
 `config.json`, password MQTT/Wi-Fi, impostazioni e codici RAW IR
 restano intatti.
 
-**Per il primo passaggio da 0.3.1 a 0.3.2** occorre installare il nuovo
-firmware tramite USB o caricamento manuale `.bin`, perché la 0.3.1
-non conosce ancora gli asset web del manifest. Da allora il pulsante
-GitHub aggiornera' autonomamente anche la dashboard. L'aggiornamento
-della sola UI non forza un riavvio; ricaricare il browser con
-`Ctrl+Shift+R`. Il download e' autenticato e la conferma fisica OFF
-resta obbligatoria.
+**Primo passaggio da 0.3.1 a 0.3.2:** la versione 0.3.1 puo'
+gia' aggiornare il **firmware** dal pulsante GitHub, ma ignora ancora
+gli asset web. Se Wi-Fi e Internet sono stabili, installare prima
+il firmware 0.3.2 da GitHub; dopo il riavvio, aprire nuovamente
+`/update` e installare l'eventuale aggiornamento della dashboard.
+In alternativa usare USB o il caricamento manuale `.bin` per
+il primo passaggio. **Non utilizzare `uploadfs`**.
+In seguito gli aggiornamenti firmware e web saranno indipendenti.
+L'aggiornamento della sola UI non forza un riavvio; ricaricare
+la pagina con `Ctrl+Shift+R`. Il download e' autenticato
+e la conferma fisica OFF resta obbligatoria.
 
 Per limiti, staging, recupero e compatibilita' vedere
 [docs/OTA.md](docs/OTA.md).

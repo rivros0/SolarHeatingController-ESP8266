@@ -69,9 +69,10 @@ ripetere il controllo OTA per completare gli asset rimanenti.
 Una modifica della sola dashboard non obbliga a riavviare l'ESP8266.
 
 Il caricamento manuale `POST /update` resta limitato al firmware
-`.bin` e non aggiorna i file web. Per la prima installazione della
-versione 0.3.2 da firmware precedenti e' richiesto upload USB o
-OTA manuale del nuovo firmware.
+`.bin` e non aggiorna i file web. Per il passaggio da 0.3.1 a 0.3.2 e' sufficiente anche l'OTA
+GitHub gia' presente nella 0.3.1: prima si installa il firmware nuovo,
+poi si ripete la verifica per i file web (non riconosciuti dalla 0.3.1).
+Se la rete e' instabile, resta preferibile il flash USB.
 
 ## Configurazione
 
