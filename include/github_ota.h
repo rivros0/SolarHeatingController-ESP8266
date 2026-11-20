@@ -30,11 +30,10 @@ struct GithubFirmwareInfo {
   bool webSupported = false;
   bool webAvailable = false;
   GithubWebAssetInfo web[GITHUB_WEB_ASSET_COUNT];
-
-  bool anythingAvailable() const {
-    return available || webAvailable;
-  }
 };
+
+// Helper procedurale: vero quando firmware o dashboard richiedono update.
+bool githubAnythingAvailable(const GithubFirmwareInfo& info);
 
 // Controlla HTTPS, versione, layout, scheda, SHA256 e stato dei file web.
 // I file locali vengono confrontati in streaming, senza alterare LittleFS.
