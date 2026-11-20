@@ -330,13 +330,13 @@ bool githubFirmwareCheck(const char* installedVersion,
     return false;
   }
   int length=http.getSize();
-  if(length<1 || length>4096) {
+  if(length<1 || length>6144) {
     error="Dimensione manifest non valida";
     http.end();
     return false;
   }
 
-  DynamicJsonDocument doc(3072);
+  DynamicJsonDocument doc(6144);
   DeserializationError parseError=deserializeJson(doc,http.getStream(),DeserializationOption::NestingLimit(6));
   http.end();
   if(parseError || !doc.is<JsonObject>()) {
@@ -364,6 +364,47 @@ bool githubFirmwareCheck(const char* installedVersion,
   result.sha256=sha;
   result.size=size;
   result.available=newer(version,String(installedVersion));
+
+  // Manifest legacy: il firmware e' aggiornabile anche senza sezione web.
+  // Quando presente, la sezione web deve essere completa e valida.
+  JsonVariantConst webManifest = doc["web"];
+  if(!webManifest.isNull()) {
+    if(!webManifest.is<JsonObjectConst>()) {
+      error = "Manifest web non valido";
+      return false;
+    }
+
+    result.webSupported = true;
+    size_t totalSize = 0;
+
+    for(size_t index = 0; index < GITHUB_WEB_ASSET_COUNT; index++) {
+      JsonVariantConst asset = webManifest[WEB_NAMES[index]];
+      if(!asset.is<JsonObjectConst>()) {
+        error = "Asset web mancante nel manifest: " + String(WEB_NAMES[index]);
+        return false;
+      }
+
+      GithubWebAssetInfo& entry = result.web[index];
+      entry.sha256 = asset["sha256"].as<String>();
+      entry.size = asset["size"] | 0UL;
+
+      if(!validSha256(entry.sha256) ||
+         entry.size == 0 ||
+         entry.size > MAX_WEB_FILE_BYTES ||
+         totalSize + entry.size > MAX_WEB_TOTAL_BYTES) {
+        error = "Asset web non valido: " + String(WEB_NAMES[index]);
+        return false;
+      }
+
+      totalSize += entry.size;
+      entry.needsUpdate = !webFileMatches(index, entry.size, entry.sha256);
+      if(entry.needsUpdate) {
+        result.webAvailable = true;
+      }
+      yield();
+    }
+  }
+
   return true;
 }
 
@@ -514,5 +555,95 @@ bool githubFirmwareInstall(const GithubFirmwareInfo& firmware,
     error="Finalizzazione OTA fallita: "+Update.getErrorString();
     return false;
   }
+  return true;
+}
+
+
+// ============================================================================
+// AGGIORNAMENTO WEB SELETTIVO
+//
+// Scarica soltanto i tre asset pubblici dichiarati nel manifest. Tutti
+// vengono verificati prima della promozione su LittleFS; il filesystem non
+// viene mai formattato. Una perdita di corrente durante la promozione puo'
+// lasciare asset di due revisioni, ma il prossimo controllo checksum rileva
+// i singoli file ancora da aggiornare e consente di completare il ripristino.
+// ============================================================================
+
+void githubWebCleanup() {
+  for(size_t index = 0; index < GITHUB_WEB_ASSET_COUNT; index++) {
+    if(LittleFS.exists(WEB_TEMP[index])) {
+      LittleFS.remove(WEB_TEMP[index]);
+    }
+  }
+}
+
+bool githubWebInstall(const GithubFirmwareInfo& firmware, String& error) {
+  if(!firmware.webSupported) {
+    error = "Manifest GitHub privo degli asset web verificabili";
+    return false;
+  }
+
+  if(!firmware.webAvailable) {
+    return true;
+  }
+
+  if(!networkReady(error)) {
+    return false;
+  }
+
+  FSInfo filesystem;
+  if(!LittleFS.info(filesystem)) {
+    error = "LittleFS non disponibile";
+    return false;
+  }
+
+  // Elimina soltanto residui temporanei di precedenti aggiornamenti.
+  // Nessuna configurazione privata viene toccata.
+  githubWebCleanup();
+
+  size_t stagingBytes = 0;
+  for(size_t index = 0; index < GITHUB_WEB_ASSET_COUNT; index++) {
+    if(firmware.web[index].needsUpdate) {
+      stagingBytes += firmware.web[index].size;
+    }
+  }
+
+  if(filesystem.totalBytes < filesystem.usedBytes ||
+     stagingBytes + WEB_FS_MARGIN_BYTES >
+       filesystem.totalBytes - filesystem.usedBytes) {
+    error = "Spazio LittleFS insufficiente per i file web temporanei";
+    return false;
+  }
+
+  // Fase 1: tutti i file necessari sono salvati e verificati SHA256.
+  // Un errore di rete lascia intatta la dashboard precedentemente attiva.
+  for(size_t index = 0; index < GITHUB_WEB_ASSET_COUNT; index++) {
+    if(!firmware.web[index].needsUpdate) {
+      continue;
+    }
+
+    if(!downloadVerifiedWebAsset(index, firmware.web[index], error)) {
+      githubWebCleanup();
+      return false;
+    }
+  }
+
+  // Fase 2: promozione con rename atomico del singolo file.
+  // I nomi dei file di destinazione sono fissati nel firmware.
+  // Un'interruzione non cancella credenziali/configurazione/codici IR.
+  for(size_t index = 0; index < GITHUB_WEB_ASSET_COUNT; index++) {
+    if(!firmware.web[index].needsUpdate) {
+      continue;
+    }
+
+    if(!LittleFS.rename(WEB_TEMP[index], WEB_LOCAL[index])) {
+      error = "Impossibile applicare asset web: " + String(WEB_NAMES[index]) +
+              ". Ripetere verifica aggiornamenti.";
+      githubWebCleanup();
+      return false;
+    }
+  }
+
+  githubWebCleanup();
   return true;
 }
