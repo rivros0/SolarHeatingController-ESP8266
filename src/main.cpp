@@ -538,7 +538,7 @@ void setupRoutes() {
       response["size"] = info.size;
 
       // Compatibilita' API: "available" indica qualsiasi aggiornamento.
-      response["available"] = info.anythingAvailable();
+      response["available"] = githubAnythingAvailable(info);
       response["firmwareAvailable"] = info.available;
       response["webSupported"] = info.webSupported;
       response["webAvailable"] = info.webAvailable;
@@ -578,7 +578,7 @@ void setupRoutes() {
       web.send(502,"text/plain",error);
       return;
     }
-    if(!info.anythingAvailable()) {
+    if(!githubAnythingAvailable(info)) {
       web.send(409,"text/plain","Firmware e interfaccia web gia' aggiornati.");
       return;
     }
