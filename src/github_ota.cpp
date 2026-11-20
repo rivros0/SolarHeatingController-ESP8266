@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
+#include <StreamString.h>
 #include <WiFiClientSecureBearSSL.h>
 #include <LittleFS.h>
 #include <Updater.h>
@@ -135,8 +136,8 @@ String hexDigest(const uint8_t* digest) {
   return String(hex);
 }
 
-bool webFileMatches(size_t index, size_t expectedSize, const String& sha) {
-  File input = LittleFS.open(WEB_LOCAL[index], "r");
+bool fileMatchesSha256(const char* path, size_t expectedSize, const String& sha) {
+  File input = LittleFS.open(path, "r");
   if(!input) {
     return false;
   }
@@ -172,6 +173,10 @@ bool webFileMatches(size_t index, size_t expectedSize, const String& sha) {
   hash.end();
   const uint8_t* digest = static_cast<const uint8_t*>(hash.hash());
   return sha.equalsIgnoreCase(hexDigest(digest));
+}
+
+bool webFileMatches(size_t index, size_t expectedSize, const String& sha) {
+  return fileMatchesSha256(WEB_LOCAL[index], expectedSize, sha);
 }
 
 // ---------------------------------------------------------------------------
@@ -219,71 +224,27 @@ bool downloadVerifiedWebAsset(size_t index,
     return false;
   }
 
-  BearSSL::HashSHA256 hash;
-  hash.begin();
-  WiFiClient* stream = http.getStreamPtr();
-
-  uint8_t buffer[512];
-  size_t received = 0;
-  unsigned long started = millis();
-  unsigned long lastActivity = started;
-  bool writeSucceeded = true;
-
-  while(received < asset.size) {
-    const unsigned long now = millis();
-    if(now - started > 120000UL || now - lastActivity > 15000UL) {
-      error = "Timeout durante il download: " + String(WEB_NAMES[index]);
-      writeSucceeded = false;
-      break;
-    }
-
-    size_t available = stream->available();
-    if(available == 0) {
-      delay(10);
-      continue;
-    }
-
-    size_t count = available;
-    if(count > sizeof(buffer)) {
-      count = sizeof(buffer);
-    }
-    if(count > asset.size - received) {
-      count = asset.size - received;
-    }
-
-    const int bytesRead = stream->readBytes(buffer, count);
-    if(bytesRead <= 0) {
-      error = "Lettura HTTPS fallita: " + String(WEB_NAMES[index]);
-      writeSucceeded = false;
-      break;
-    }
-
-    if(stage.write(buffer, size_t(bytesRead)) != size_t(bytesRead)) {
-      error = "Scrittura LittleFS fallita: " + String(WEB_NAMES[index]);
-      writeSucceeded = false;
-      break;
-    }
-
-    hash.add(buffer, bytesRead);
-    received += size_t(bytesRead);
-    lastActivity = millis();
-    yield();
-  }
-
+  // HTTPClient trasferisce e decodifica il body completo (Content-Length
+  // o chunked) prima della verifica. Non leggere il WiFiClient grezzo:
+  // eventuali delimitatori HTTP provocherebbero falsi checksum.
+  const int transferred = http.writeToStream(&stage);
   stage.flush();
   stage.close();
   http.end();
 
-  if(!writeSucceeded || received != asset.size) {
+  if(transferred < 0 || size_t(transferred) != asset.size) {
     LittleFS.remove(WEB_TEMP[index]);
+    error = "Download web incompleto: " + String(WEB_NAMES[index]) +
+      " (HTTP " + String(transferred) + " byte, attesi " +
+      String(asset.size) + ")";
     return false;
   }
 
-  hash.end();
-  const uint8_t* digest = static_cast<const uint8_t*>(hash.hash());
-  if(!asset.sha256.equalsIgnoreCase(hexDigest(digest))) {
+  // Il file verificato e' quello realmente salvato nella flash,
+  // non un hash calcolato su dati eventualmente persi in scrittura.
+  if(!fileMatchesSha256(WEB_TEMP[index], asset.size, asset.sha256)) {
     LittleFS.remove(WEB_TEMP[index]);
-    error = "SHA256 errato: " + String(WEB_NAMES[index]);
+    error = "SHA256 o dimensione errata: " + String(WEB_NAMES[index]);
     return false;
   }
 
@@ -340,11 +301,47 @@ bool githubFirmwareCheck(const char* installedVersion,
     return false;
   }
 
-  DynamicJsonDocument doc(6144);
-  DeserializationError parseError=deserializeJson(doc,http.getStream(),DeserializationOption::NestingLimit(6));
+  // ========================================================================
+  // LETTURA MANIFEST ROBUSTA
+  //
+  // IMPORTANTE: http.getStream() espone il WiFiClient grezzo, non il body
+  // decodificato dall'HTTPClient. ArduinoJson puo' quindi ricevere byte
+  // parziali o chunk HTTP e restituire IncompleteInput/InvalidInput.
+  //
+  // HTTPClient::writeToStream gestisce Content-Length, chunked transfer,
+  // timeout e connessioni interrotte. Interpretiamo JSON SOLO dopo avere
+  // verificato la ricezione di tutti i byte promessi dal server.
+  // ========================================================================
+  StreamString payload;
+  if(!payload.reserve(size_t(length) + 1)) {
+    error="Memoria insufficiente per il manifest GitHub";
+    http.end();
+    return false;
+  }
+
+  const int downloaded=http.writeToStream(&payload);
   http.end();
+
+  if(downloaded < 0) {
+    error="Ricezione HTTP manifest fallita (codice "+String(downloaded)+")";
+    Serial.println(String("[OTA] ") + error);
+    return false;
+  }
+  if(downloaded != length || payload.length() != size_t(length)) {
+    error="Manifest HTTP incompleto: attesi "+String(length)+
+          " byte, ricevuti "+String(payload.length());
+    Serial.println(String("[OTA] ") + error);
+    return false;
+  }
+
+  DynamicJsonDocument doc(6144);
+  DeserializationError parseError=deserializeJson(
+    doc, payload.c_str(), DeserializationOption::NestingLimit(6)
+  );
   if(parseError || !doc.is<JsonObject>()) {
-    error="Manifest firmware JSON non valido";
+    error="Manifest firmware JSON non valido (ArduinoJson: "+
+          String(parseError.c_str())+", byte="+String(payload.length())+")";
+    Serial.println(String("[OTA] ") + error);
     return false;
   }
 
@@ -465,63 +462,29 @@ bool githubFirmwareInstall(const GithubFirmwareInfo& firmware,
     return false;
   }
 
-  BearSSL::HashSHA256 hash;
-  hash.begin();
-  WiFiClient* stream=http.getStreamPtr();
-  uint8_t buffer[512];
-  size_t received=0;
-  unsigned long lastActivity=millis();
-  unsigned long start=millis();
-  bool ok=true;
-
-  while(received<firmware.size) {
-    if(millis()-start>180000UL || millis()-lastActivity>15000UL) {
-      error="Timeout scaricamento firmware";
-      ok=false;
-      break;
-    }
-
-    size_t available=stream->available();
-    if(available==0) {
-      delay(10);
-      continue;
-    }
-    size_t count=available;
-    if(count>sizeof(buffer)) count=sizeof(buffer);
-    if(count>firmware.size-received) count=firmware.size-received;
-    int read=stream->readBytes(buffer,count);
-    if(read<=0 || stage.write(buffer,read)!=size_t(read)) {
-      error="Scrittura temporanea LittleFS fallita";
-      ok=false;
-      break;
-    }
-    hash.add(buffer,read);
-    received+=read;
-    lastActivity=millis();
-    yield();
-  }
+  // Il body e' letto dal layer HTTPClient anziche' dal TLS socket grezzo:
+  // questo gestisce correttamente i blocchi del protocollo HTTP.
+  const int downloaded = http.writeToStream(&stage);
   stage.flush();
   stage.close();
   http.end();
 
-  if(!ok || received!=firmware.size) {
+  if(downloaded < 0 || size_t(downloaded) != firmware.size) {
     removeTemp();
+    error = "Download firmware incompleto: attesi " + String(firmware.size) +
+            " byte, ricevuti/codice HTTP " + String(downloaded);
     return false;
   }
 
-  hash.end();
-  const uint8_t* digest=static_cast<const uint8_t*>(hash.hash());
-  char hex[65];
-  for(int i=0;i<32;i++) {
-    snprintf(hex+i*2,3,"%02x",digest[i]);
-  }
-  hex[64]=0;
-  if(!firmware.sha256.equalsIgnoreCase(String(hex))) {
+  // Calcola SHA256 sul file realmente scritto in LittleFS prima di avviare
+  // l'Updater. Il firmware non verra' mai programmato se la verifica fallisce.
+  if(!fileMatchesSha256(TEMP_FIRMWARE, firmware.size, firmware.sha256)) {
     removeTemp();
-    error="Checksum SHA256 NON valido: firmware rifiutato";
+    error = "SHA256 o dimensione firmware non valida: aggiornamento rifiutato";
     return false;
   }
 
+  uint8_t buffer[512];
   stage=LittleFS.open(TEMP_FIRMWARE,"r");
   if(!stage) {
     error="Riapertura file firmware fallita";
