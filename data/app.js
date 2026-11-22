@@ -87,13 +87,15 @@ async function updateHistoryForActiveTab() {
   }
 
   historyFetchInProgress = true;
+  // Memorizza anche i tentativi falliti: evita di saturare il webserver
+  // con richieste a ripetizione ogni 3 secondi se LittleFS e' occupato.
+  historyLastFetchAt = Date.now();
   try {
     const rows = await api("/api/history");
     if(!Array.isArray(rows)) {
       throw new Error("Formato storico non valido.");
     }
     historyCache = rows;
-    historyLastFetchAt = Date.now();
     $("historyStorageStatus").textContent =
       rows.length + " campioni disponibili · massimo 1.440 su 24 ore. " +
       "I dati sono conservati su LittleFS.";
