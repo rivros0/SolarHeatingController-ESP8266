@@ -43,6 +43,51 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 
 Al riavvio il controller entra sempre in **Forza OFF con stato fisico sconosciuto**. Non invia un toggle e non presume che il climatizzatore sia spento. Se dispone già di codici discreti verificati, Forza OFF o una protezione possono inviare un unico OFF preventivo anche da stato sconosciuto. L'ultima modalità richiesta è salvata a fini diagnostici; la ripartenza automatica dopo un reset richiede una nuova conferma fisica o un comando OFF discreto. Questa scelta evita avvii e inversioni inattesi dopo OTA o interruzioni di alimentazione.
 
+## Applicare davvero i topic MQTT sul dispositivo già configurato
+
+La release del firmware **NON** sostituisce `/config.json`.
+Se il monitor mostra `MQTT: SI`, ma `pv/load/battery` sono tutti vuoti,
+è necessario assegnare i topic nella configurazione **persistente**.
+Si può fare dalla dashboard con il pulsante **Applica profilo MQTT**;
+se la dashboard non è aggiornata, utilizzare lo script da VS Code:
+
+```bash
+cd ~/Documenti/Bionic/SolarHeatingController-ESP8266-v021
+git pull --ff-only origin main
+
+# Anteprima, soltanto letture:
+python3 scripts/apply_solarassistant_profile.py --check
+
+# Applica e riavvia, dopo conferma fisica OFF nei popup:
+python3 scripts/apply_solarassistant_profile.py --host 192.168.1.242
+
+# Verifica l'acquisizione reale dopo il riavvio:
+python3 scripts/diagnose_mqtt.py --host 192.168.1.242 --seconds 15
+```
+
+Lo script utilizza solo le **credenziali WEB** della dashboard,
+richieste senza eco. Non occorre immettere la password MQTT: il firmware
+la conserva. Sono richieste conferme dello **stato fisico OFF** tramite
+finestra `kdialog` o `zenity` prima del salvataggio e del riavvio;
+se non è disponibile un ambiente grafico, la procedura si blocca.
+Su Kubuntu, se mancante, installare `kdialog` con
+`sudo apt install kdialog`.
+
+Il programma legge prima la configurazione corrente, mostra le
+differenze, imposta il broker `192.168.1.240:1883`, i **sette topic
+effettivamente osservati**, il filtro wildcard vuoto, l'interpretazione
+di potenza e corrente negative come scarica e **disabilita
+l'automazione**. Preserva credenziali, impostazioni IR, soglie e rete.
+Usa la conferma OFF autenticata, il POST di configurazione con CSRF,
+riavvia via API e verifica che la configurazione sia effettivamente
+salvata dopo il riavvio. Non esegue `uploadfs` e non scrive
+le credenziali in chiaro su file o log.
+
+L'operazione può essere ripetuta: se il profilo è già corretto,
+la procedura termina senza inviare POST. In quel caso il problema
+non è più la mappatura persistente, e va diagnosticato tramite
+`scripts/diagnose_mqtt.py`, che legge lo stato SUBACK e i campioni.
+
 ## Diagnosi ricezione MQTT senza effettuare flash
 
 Se la dashboard visualizza `—` nonostante il broker SolarAssistant
