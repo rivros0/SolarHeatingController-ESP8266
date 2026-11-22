@@ -15,7 +15,10 @@ struct Config {
   int model=1; float setpoint=22;
   uint32_t irFingerprint=0;
   uint16_t mqttPort=1883, mqttKeepalive=20;
-  uint32_t sampleMs=5000, historyMs=30000, forceOnMs=3600000;
+  // Storico conservato su LittleFS: default un punto ogni minuto (24 ore).
+  // I valori precedenti a 60000 ms vengono limitati nel loop, senza
+  // invalidare le configurazioni persistenti gia' presenti.
+  uint32_t sampleMs=5000, historyMs=60000, forceOnMs=3600000;
   float filterAlpha=0.25;
   bool receiver=false, irVerified=false, automationEnabled=false;
   solar::EnergyConfig energy;
