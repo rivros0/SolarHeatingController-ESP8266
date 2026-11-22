@@ -50,7 +50,9 @@ function historyVisibleRows(rows, selectedHours, nowSeconds) {
   const visible = [{s:start, pv:null, load:null, battery:null,
                     t:null, h:null, on:false, known:false}];
   for(const row of rows) {
-    if(Number.isFinite(row.s) && row.s>=start && row.s<=nowSeconds) {
+    // Il bordo sinistro rappresenta il limite temporale; il primo
+    // campione ammissibile e' nel minuto successivo (N * 60 punti).
+    if(Number.isFinite(row.s) && row.s>start && row.s<=nowSeconds) {
       visible.push(row);
     }
   }
