@@ -77,7 +77,10 @@ Applica profilo MQTT SolarAssistant (192.168.1.240)
 </section>
 
 <section class="tab-panel" id="tab-diagnostics" role="tabpanel" aria-labelledby="tab-button-diagnostics" hidden>
-  <section class="panel"><div class="section-title"><h2>Diagnostica & topic MQTT</h2><button id="refreshDiagnostics" class="secondary">Aggiorna</button><button id="exportLogs" class="secondary">Esporta log</button></div><p>Solo i messaggi live aggiornano le decisioni. Associa i topic esatti nella configurazione; il filtro di scoperta è facoltativo.</p><div class="table-wrap"><table><thead><tr><th>Topic</th><th>Valore</th><th>Età</th><th>Retained</th></tr></thead><tbody id="topics"></tbody></table></div><pre id="events"></pre><dl id="system"></dl></section>
+  <section class="panel"><div class="section-title"><h2>Diagnostica & topic MQTT</h2><button id="refreshDiagnostics" class="secondary">Aggiorna</button><button id="exportLogs" class="secondary">Esporta log</button></div><p>Solo i messaggi live aggiornano le decisioni. Associa i topic esatti nella configurazione; il filtro di scoperta è facoltativo. Per ridurre il traffico MQTT, il profilo SolarAssistant disattiva il filtro generale e mantiene soltanto le sottoscrizioni energetiche necessarie.</p>
+<h3>Sottoscrizioni MQTT effettive (SUBACK)</h3>
+<p id="mqttSummary" class="reason" aria-live="polite">Verifica delle sottoscrizioni MQTT…</p>
+<div class="table-wrap"><table aria-label="Esito delle sottoscrizioni MQTT"><thead><tr><th>Misura</th><th>Esito SUBACK</th><th>Dato valido</th><th>Età</th><th>Topic</th></tr></thead><tbody id="mqttSubscriptions"></tbody></table></div><div class="table-wrap"><table><thead><tr><th>Topic</th><th>Valore</th><th>Età</th><th>Retained</th></tr></thead><tbody id="topics"></tbody></table></div><pre id="events"></pre><dl id="system"></dl></section>
 </section>
 
 <footer>SolarHeatingController-ESP8266 · Locale, senza cloud · <span id="version"></span></footer></main></body></html>

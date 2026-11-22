@@ -69,7 +69,9 @@ const updated = createProfile(existing);
 
 assert.equal(updated.mqttHost, "192.168.1.240");
 assert.equal(updated.mqttPort, 1883);
-assert.equal(updated.discovery, "solar_assistant/#");
+// Il filtro wildcard e' opzionale e provoca traffico inutile sui NodeMCU.
+// Il profilo domestico lo disattiva, ma il campo resta configurabile.
+assert.equal(updated.discovery, "");
 
 for(const [key, expected] of Object.entries(actualTopics)) {
   assert.equal(updated.topics[key], expected, "Topic errato per " + key);

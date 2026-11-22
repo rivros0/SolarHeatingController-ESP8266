@@ -110,6 +110,21 @@ def show_snapshot(state, label):
     print("Messaggi retained ignorati:", state.get("retainedIgnored", "n/d"))
     print("Tempo dall'ultimo topic riconosciuto (ms):",
           state.get("lastMqttAgeMs", "n/d"))
+    if "mqttReceived" in state:
+        print("PUBLISH ricevuti:", state.get("mqttReceived"))
+        print("PUBLISH sui topic configurati:", state.get("mqttMatched"))
+        print("Campioni accettati:", state.get("mqttAccepted"))
+        print("PUBLISH su altri topic:", state.get("mqttUnmatched"))
+        print("PUBLISH frammentati:", state.get("mqttFragmented"))
+        print("PUBLISH troppo grandi:", state.get("mqttOversized"))
+        print("Payload non validi:", state.get("mqttInvalid"))
+        print(
+            "SUBSCRIBE confermate/richieste: {}/{}; fallite: {}".format(
+                state.get("mqttSubscriptionsOk"),
+                state.get("mqttSubscriptionsRequested"),
+                state.get("mqttSubscriptionsFailed"),
+            )
+        )
 
     for name in ("pv", "load", "battery", "voltage", "current", "soc"):
         measurement = get_metric(state, name)
@@ -168,6 +183,28 @@ def show_seen_topics(diagnostics):
                 row.get("value", ""),
                 human_flag(row.get("retained")),
                 row.get("ageMs", "n/d"),
+            )
+        )
+
+
+def show_subscriptions(diagnostics):
+    """Mostra il risultato SUBACK dei topic effettivamente richiesti."""
+    subscriptions = diagnostics.get("subscriptions")
+    if not isinstance(subscriptions, list):
+        print("\\nSUBACK non disponibili: firmware precedente alla 0.3.6.")
+        return
+
+    print("\\n=== SUBSCRIBE E SUBACK PER METRICA ===")
+    for entry in subscriptions:
+        label = entry.get("metric", "?")
+        status = entry.get("status", "?")
+        valid = entry.get("valid")
+        age = entry.get("ageMs")
+        topic = entry.get("topic", "")
+
+        print(
+            "{:<9} {:<14} valido={} eta={} ms {}".format(
+                label, status, valid, age, topic
             )
         )
 
@@ -296,6 +333,7 @@ def main():
                 base_url, "/api/diagnostics", authorization, args.timeout
             )
             show_seen_topics(diagnostics)
+            show_subscriptions(diagnostics)
         except (OSError, ValueError, json.JSONDecodeError) as error:
             print("Diagnostica topic non disponibile:", str(error))
 
