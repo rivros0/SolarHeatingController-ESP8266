@@ -42,18 +42,50 @@ EXPECTED_TOPICS = {
 }
 
 
-def request_json(base_url, endpoint, authorization):
-    """Effettua una richiesta in sola lettura con timeout e Basic HTTP."""
+def request_json(base_url, endpoint, authorization, timeout):
+    """
+    Esegue una lettura HTTP in sola lettura, mostrando il percorso richiesto.
+
+    Se la connessione va in timeout, la stampa precedente permette di
+    distinguere il blocco del webserver da un problema dei topic MQTT.
+    """
     request = Request(base_url + endpoint, method="GET")
     request.add_header("Authorization", authorization)
     request.add_header("Accept", "application/json")
     request.add_header("Cache-Control", "no-store")
 
-    with urlopen(request, timeout=12) as response:
-        payload = response.read(131072)
-        if len(payload) >= 131072:
-            raise ValueError("Risposta JSON troppo grande.")
-        return json.loads(payload.decode("utf-8"))
+    print("GET {} ...".format(endpoint), flush=True)
+    started = time.monotonic()
+
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            payload = response.read(131072)
+            if len(payload) >= 131072:
+                raise ValueError("Risposta JSON troppo grande.")
+
+            data = json.loads(payload.decode("utf-8"))
+            elapsed_seconds = time.monotonic() - started
+            print(
+                "OK  {}: {} byte in {:.1f} s".format(
+                    endpoint, len(payload), elapsed_seconds
+                ),
+                flush=True,
+            )
+            return data
+    except HTTPError as error:
+        print(
+            "HTTP {} su {}. Verificare l'utente web e la password WEB.".format(
+                error.code, endpoint
+            ),
+            flush=True,
+        )
+        raise
+    except (TimeoutError, URLError, OSError) as error:
+        print(
+            "ERRORE CONNESSIONE su {}: {}".format(endpoint, str(error)),
+            flush=True,
+        )
+        raise
 
 
 def human_flag(value):
@@ -206,10 +238,18 @@ def main():
                         help="IP o hostname dell'ESP8266 (default 192.168.1.242)")
     parser.add_argument("--seconds", type=int, default=12,
                         help="Secondi tra le due letture (default 12)")
+    parser.add_argument("--timeout", type=int, default=25,
+                        help="Timeout HTTP per ciascuna richiesta (default 25 s)")
+    parser.add_argument(
+        "--quick", action="store_true",
+        help="Legge soltanto /api/state per testare il webserver in pochi secondi"
+    )
     args = parser.parse_args()
 
     if args.seconds < 1 or args.seconds > 120:
         parser.error("--seconds deve essere compreso tra 1 e 120")
+    if args.timeout < 2 or args.timeout > 90:
+        parser.error("--timeout deve essere compreso tra 2 e 90")
 
     host = args.host.strip()
     if not host or "/" in host or "@" in host or ":" in host:
@@ -226,19 +266,34 @@ def main():
     password = ""
 
     try:
-        config = request_json(base_url, "/api/config", authorization)
-        first = request_json(base_url, "/api/state", authorization)
+        # La verifica rapida esclude volutamente la lettura di /api/config:
+        # consente di diagnosticare un eventuale blocco di quella rotta.
+        if args.quick:
+            state = request_json(
+                base_url, "/api/state", authorization, args.timeout
+            )
+            show_snapshot(state, "CONTROLLO RAPIDO")
+            return 0
+
+        config = request_json(
+            base_url, "/api/config", authorization, args.timeout
+        )
+        first = request_json(
+            base_url, "/api/state", authorization, args.timeout
+        )
         show_configuration(config)
         show_snapshot(first, "PRIMA LETTURA")
 
         print("\nOsservazione live per {} secondi...".format(args.seconds))
         time.sleep(args.seconds)
 
-        second = request_json(base_url, "/api/state", authorization)
+        second = request_json(
+            base_url, "/api/state", authorization, args.timeout
+        )
         show_snapshot(second, "SECONDA LETTURA")
         try:
             diagnostics = request_json(
-                base_url, "/api/diagnostics", authorization
+                base_url, "/api/diagnostics", authorization, args.timeout
             )
             show_seen_topics(diagnostics)
         except (OSError, ValueError, json.JSONDecodeError) as error:
@@ -251,7 +306,18 @@ def main():
         explain(config, first, second, mismatches)
 
     except HTTPError as error:
-        print("ERRORE HTTP {}: controllare credenziali/ESP.".format(error.code))
+        if error.code == 401:
+            print(
+                "ERRORE 401: l'ESP ha risposto, ma le credenziali WEB "
+                "non sono state accettate. "
+                "Verificare l'utente configurato (non necessariamente admin)."
+            )
+        else:
+            print(
+                "ERRORE HTTP {}: verificare risposta del dispositivo.".format(
+                    error.code
+                )
+            )
         return 1
     except (URLError, OSError, ValueError, json.JSONDecodeError) as error:
         print("ERRORE DI LETTURA:", str(error))
