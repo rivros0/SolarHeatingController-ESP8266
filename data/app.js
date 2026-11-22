@@ -803,7 +803,9 @@ function knownSolarAssistantConfig(currentConfig) {
 
   updated.mqttHost = "192.168.1.240";
   updated.mqttPort = 1883;
-  updated.discovery = "solar_assistant/#";
+  // In funzionamento ordinario sottoscriviamo soltanto i topic utili.
+  // Il filtro wildcard puo' essere riattivato manualmente per la diagnosi.
+  updated.discovery = "";
 
   updated.topics = {
     pv: "solar_assistant/inverter_1/pv_power/state",
