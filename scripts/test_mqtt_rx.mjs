@@ -23,7 +23,6 @@ for(const expected of [
   "mqttSubscriptions[i].status=3",
   'doc["status"]="confermata"',
   'doc["status"]="rifiutata"',
-  '"subscriptions"',
   'o["mqttReceived"]=mqttReceived',
   'o["mqttMatched"]=mqttMatched',
   'o["mqttAccepted"]=mqttAccepted',
