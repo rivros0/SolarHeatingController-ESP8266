@@ -43,6 +43,39 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 
 Al riavvio il controller entra sempre in **Forza OFF con stato fisico sconosciuto**. Non invia un toggle e non presume che il climatizzatore sia spento. Se dispone già di codici discreti verificati, Forza OFF o una protezione possono inviare un unico OFF preventivo anche da stato sconosciuto. L'ultima modalità richiesta è salvata a fini diagnostici; la ripartenza automatica dopo un reset richiede una nuova conferma fisica o un comando OFF discreto. Questa scelta evita avvii e inversioni inattesi dopo OTA o interruzioni di alimentazione.
 
+## Diagnosi ricezione MQTT senza effettuare flash
+
+Se la dashboard visualizza `—` nonostante il broker SolarAssistant
+pubblichi valori live, utilizzare **prima** il diagnostico in sola lettura:
+
+```bash
+cd ~/Documenti/Bionic/SolarHeatingController-ESP8266-v021
+git pull --ff-only origin main
+python3 scripts/diagnose_mqtt.py --host 192.168.1.242
+```
+
+Lo script chiede soltanto le credenziali **dell'interfaccia web**
+(non quelle MQTT) e consulta `/api/config`, `/api/state` e
+`/api/diagnostics` su due istanti distanti 12 secondi.
+
+Controlla esattamente quali topic sono salvati, se un riavvio e'
+ancora richiesto, stato Wi-Fi/MQTT, validita' ed eta' delle sei
+metriche, quanti messaggi sono stati rifiutati e la differenza
+nel contatore *retained ignored*. Non stampa password né token CSRF
+e non invia richieste POST, non scrive su LittleFS e non modifica
+climatizzatore o automazione.
+
+**Interpretazione:** `mqtt=true` certifica il collegamento al broker
+ma non la sottoscrizione effettiva ai topic. Se i topic coincidono e
+le metriche restano invalide, il firmware attuale non mostra gli
+acknowledgement SUBACK. Servira' aggiungere tale diagnostica
+specifica, oppure controllare i topic realmente ricevuti in
+`/api/diagnostics`. Quest'ultima memorizza soltanto 12 topic
+e l'assenza di un topic dalla lista NON ne dimostra la mancata ricezione.
+
+Non lanciare un nuovo `uploadfs` per correggere una misura mancante:
+cancellerebbe configurazione, credenziali e catture IR.
+
 ## Profilo MQTT SolarAssistant dell'impianto domestico (v0.3.5)
 
 Sono state verificate le pubblicazioni live del broker MQTT

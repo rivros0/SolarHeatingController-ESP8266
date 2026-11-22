@@ -18,6 +18,10 @@ jobs:
         run: node scripts/test_off_confirmation.mjs
       - name: Test profilo MQTT SolarAssistant e preservazione credenziali
         run: node scripts/test_solarassistant_profile.mjs
+      - name: Controlla la sintassi dello script diagnostico MQTT
+        run: python3 -m py_compile scripts/diagnose_mqtt.py
+      - name: Mostra help dello script in sola lettura
+        run: python3 scripts/diagnose_mqtt.py --help
       - name: Test OTA dashboard incrementale e sintassi pagina update
         run: node scripts/test_ota_web.mjs
   firmware:
