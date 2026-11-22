@@ -20,6 +20,10 @@ jobs:
         run: node scripts/test_solarassistant_profile.mjs
       - name: Test ricezione MQTT completa, SUBACK e diagnostica
         run: node scripts/test_mqtt_rx.mjs
+      - name: Test applicazione profilo MQTT via API (senza dispositivo)
+        run: python3 scripts/test_apply_solarassistant_profile.py
+      - name: Controlla la sintassi del configuratore MQTT
+        run: python3 -m py_compile scripts/apply_solarassistant_profile.py
       - name: Controlla la sintassi dello script diagnostico MQTT
         run: python3 -m py_compile scripts/diagnose_mqtt.py
       - name: Mostra help dello script in sola lettura
