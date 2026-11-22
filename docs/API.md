@@ -20,6 +20,47 @@ Tutti gli endpoint, inclusi gli asset, richiedono HTTP Basic. Le mutazioni POST 
 
 Risposte: 400 richiesta/config non valida; 401 autenticazione; 403 token; 409 stato/procedura incompatibile; 413 corpo eccessivo; 503 configurazione/memoria non disponibile; 507 scrittura configurazione fallita.
 
+## Diagnostica della ricezione MQTT (v0.3.6)
+
+Il vecchio valore `mqtt: true` in `GET /api/state` conferma solo la
+connessione al broker, non il successo delle sottoscrizioni.
+La 0.3.6 aggiunge nello stesso JSON i seguenti campi (solo lettura):
+
+| Campo | Significato |
+| --- | --- |
+| `mqttReceived` | PUBLISH osservati (nuovo messaggio, non frammenti) |
+| `mqttMatched` | PUBLISH su uno dei topic configurati |
+| `mqttAccepted` | Valori live effettivamente accettati |
+| `mqttUnmatched` | PUBLISH su topic diversi da quelli delle metriche |
+| `mqttFragmented` | PUBLISH arrivati in piu' callback TCP |
+| `mqttOversized` | PUBLISH sui topic energetici di oltre 127 byte |
+| `mqttInvalid` | Payload numerico o sequenza frammenti non valida |
+| `mqttSubscriptionsRequested` | Richieste SUBSCRIBE effettuate |
+| `mqttSubscriptionsOk` | SUBACK di conferma |
+| `mqttSubscriptionsFailed` | SUBACK negati o mancato invio locale |
+| `mqttLastReceivedAgeMs` | Eta' ultimo messaggio ricevuto |
+| `mqttLastAcceptedAgeMs` | Eta' ultimo campione accettato |
+
+`GET /api/diagnostics` mantiene `events` e `topics`, e aggiunge
+l'array `subscriptions`. Ogni elemento include `metric`, `topic`,
+`packetId`, `status`, e per le metriche numeriche
+`valid` / `ageMs`. Possibili stati:
+`non_richiesta`, `in_attesa`, `confermata`, `rifiutata`.
+
+Il profilo SolarAssistant aggiornato non si sottoscrive piu' al
+wildcard diagnostico di default: solo i sette topic effettivamente
+necessari vengono richiesti. In caso di analisi avanzata il campo
+`discovery` resta configurabile (es. `solar_assistant/#`), ma attivarlo
+puo' aumentare notevolmente il traffico e i messaggi duplicati.
+Le configurazioni persistenti esistenti non vengono cambiate dal
+solo aggiornamento del firmware; per disabilitare il wildcard usare
+il pulsante **Applica profilo MQTT SolarAssistant** e riavviare.
+
+I retained continuano a essere visibili solo in diagnostica: non
+vengono accettati come telemetria live. I PUBLISH frammentati
+sui topic energetici sono ricomposti in un buffer statico di 128 byte,
+senza allocazione dinamica proporzionale al payload.
+
 ## Profilo MQTT preconfigurato (v0.3.5)
 
 `data/app.js` offre il pulsante **Applica profilo MQTT SolarAssistant**.
