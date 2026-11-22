@@ -29,6 +29,31 @@ bool sensorPresent=false,rebootNeeded=false,updateActive=false,updateOk=false,re
 uint32_t forceAt=0,rebootAt=0,lastSensor=0,lastSecond=0,lastHistory=0,lastMqttAttempt=0;
 uint32_t lastMqttAt=0,retainedIgnored=0,mqttRejected=0;
 
+// ============================================================================
+// STATO MQTT DETTAGLIATO
+//
+// AsyncMqttClient puo' spezzare un PUBLISH in piu' callback di rete.
+// I valori energetici vengono ricomposti in un buffer limitato prima
+// del parsing, evitando di scartare campioni validi per frammentazione.
+//
+// Gli identificativi SUBSCRIBE e l'esito SUBACK permettono di distinguere:
+// broker connesso, sottoscrizione richiesta, concessa o rifiutata.
+// Queste statistiche sono solo in RAM e NON modificano le protezioni.
+// ============================================================================
+static const size_t MQTT_MAX_VALUE_BYTES = 127;
+struct MqttSubscription {
+  uint16_t packetId = 0;
+  uint8_t status = 0; // 0 = assente, 1 = attesa, 2 = OK, 3 = rifiutata/fallita
+};
+MqttSubscription mqttSubscriptions[10];
+uint32_t mqttReceived=0,mqttMatched=0,mqttAccepted=0,mqttUnmatched=0;
+uint32_t mqttFragmented=0,mqttOversized=0,mqttInvalid=0;
+uint32_t mqttLastReceivedAt=0,mqttLastAcceptedAt=0;
+char mqttValueBuffer[MQTT_MAX_VALUE_BYTES+1];
+size_t mqttValueBytes=0;
+int mqttValueTopic=-1;
+
+
 // Diagnostica seriale: controllo non bloccante e riepilogo ogni 30 secondi.
 static const uint32_t SERIAL_POLL_MS = 1000UL;
 static const uint32_t SERIAL_STATUS_MS = 30000UL;
@@ -265,32 +290,201 @@ void clearTelemetry() {
   for(int i=0;i<8;i++) metric(i)->valid=false;
   inverterStatus=""; detector.invalidate(); manager.resetTimers();
 }
-void receiveMqtt(char* topic,char* payload,AsyncMqttClientMessageProperties properties,size_t len,size_t index,size_t total) {
-  // Only bounded, single-packet scalar messages. Fragmented values are rejected
-  // rather than interpreted partially. Retained payloads are NEVER live samples.
-  if(index||len!=total||total==0||total>127) { mqttRejected++; return; }
-  char value[128]; memcpy(value,payload,len); value[len]=0;
-  for(size_t i=0;i<len;i++) if(value[i]=='\0') { mqttRejected++; return; }
+// Memorizza una breve anteprima per la scheda Diagnostica. Nessuna copia
+// dell'intero PUBLISH (es. annunci discovery HomeAssistant) viene allocata.
+void rememberMqttTopic(const char* topic,const char* payload,size_t size,bool retained) {
+  char preview[81];
+  const size_t previewLength=size>80?80:size;
+  if(previewLength>0) memcpy(preview,payload,previewLength);
+  preview[previewLength]=0;
+
   int slot=-1;
-  for(int i=0;i<12;i++) if(seen[i].topic==topic) { slot=i; break; }
-  if(slot<0) { slot=seenHead; seenHead=(seenHead+1)%12; }
-  seen[slot]={String(topic).substring(0,128),String(value).substring(0,80),millis(),properties.retain};
-  if(properties.retain) { retainedIgnored++; return; }
+  for(int i=0;i<12;i++) {
+    if(seen[i].topic==topic) {
+      slot=i;
+      break;
+    }
+  }
+  if(slot<0) {
+    slot=seenHead;
+    seenHead=(seenHead+1)%12;
+  }
+  seen[slot]={String(topic).substring(0,128),String(preview),millis(),retained};
+}
+
+// ============================================================================
+// RICEZIONE MQTT SICURA E COMPLETA
+//
+// Le sottoscrizioni servono esclusivamente topic esatti.
+// Il filtro opzionale di scoperta continua a registrare messaggi estranei
+// nella diagnostica, ma NON tenta di interpretarli come misure energetiche.
+// ============================================================================
+void receiveMqtt(char* topic,char* payload,AsyncMqttClientMessageProperties properties,size_t len,size_t index,size_t total) {
+  if(index==0) {
+    mqttReceived++;
+    mqttLastReceivedAt=millis();
+  }
+
+  int topicIndex=-1;
   for(int i=0;i<9;i++) {
-    if(!cfg.topics[i].length()||cfg.topics[i]!=topic) continue;
-    lastMqttAt=millis();
-    if(i==8) { inverterStatus=value; return; }
-    char* end=nullptr; float v=strtof(value,&end);
-    while(end && (*end==' '||*end=='\r'||*end=='\n'||*end=='\t')) end++;
-    bool valid=end!=value && end && *end==0 && isfinite(v);
-    float lo=(i==2||i==4)?-100000:0,hi=(i==5?100:(i==3?200:100000));
-    if(i==4) { lo=-1000; hi=1000; }
-    valid &= v>=lo && v<=hi;
-    *metric(i)={v,millis(),valid};
-    if(!valid) mqttRejected++;
+    if(cfg.topics[i].length()>0 && cfg.topics[i]==topic) {
+      topicIndex=i;
+      break;
+    }
+  }
+
+  if(topicIndex<0) {
+    if(index==0) {
+      mqttUnmatched++;
+      // Manteniamo la funzione originale di scoperta, ma limitiamo
+      // ogni anteprima: niente allocazioni proporzionali al payload.
+      if(cfg.discovery.length()>0) {
+        rememberMqttTopic(topic,payload,len,properties.retain);
+      }
+    }
     return;
   }
+
+  if(index==0) {
+    mqttMatched++;
+    if(properties.retain) {
+      retainedIgnored++;
+      rememberMqttTopic(topic,payload,len,true);
+    }
+  }
+
+  // Un retained e' utile per diagnosticare la connessione, ma non deve
+  // autorizzare l'accensione automatica come dato aggiornato.
+  if(properties.retain) return;
+
+  if(total==0 || total>MQTT_MAX_VALUE_BYTES) {
+    if(index==0) {
+      mqttRejected++;
+      mqttOversized++;
+    }
+    mqttValueTopic=-1;
+    mqttValueBytes=0;
+    return;
+  }
+
+  if(index==0) {
+    mqttValueTopic=topicIndex;
+    mqttValueBytes=0;
+    if(len<total) mqttFragmented++;
+  }
+
+  if(mqttValueTopic!=topicIndex || index!=mqttValueBytes ||
+     index+len>total) {
+    mqttRejected++;
+    mqttInvalid++;
+    mqttValueTopic=-1;
+    mqttValueBytes=0;
+    return;
+  }
+
+  // Nessun payload oltre 127 byte arriva qui: il buffer e' statico.
+  if(len>0) memcpy(mqttValueBuffer+index,payload,len);
+  mqttValueBytes+=len;
+
+  if(mqttValueBytes<total) return;
+  mqttValueBuffer[total]=0;
+  mqttValueTopic=-1;
+  mqttValueBytes=0;
+
+  rememberMqttTopic(topic,mqttValueBuffer,total,false);
+  lastMqttAt=millis();
+
+  // Gli stati testuali dell'inverter non devono essere convertiti a float.
+  if(topicIndex==8) {
+    inverterStatus=mqttValueBuffer;
+    mqttAccepted++;
+    mqttLastAcceptedAt=millis();
+    return;
+  }
+
+  // Rifiutiamo i NUL incorporati e i valori non interamente numerici.
+  // Restano invariati i limiti di sicurezza originali per ogni metrica.
+  if(memchr(mqttValueBuffer,0,total)!=nullptr) {
+    mqttRejected++;
+    mqttInvalid++;
+    return;
+  }
+
+  char* end=nullptr;
+  const float value=strtof(mqttValueBuffer,&end);
+  while(end && (*end==' '||*end=='\\r'||*end=='\\n'||*end=='\\t')) {
+    end++;
+  }
+
+  bool valid=end!=mqttValueBuffer && end && *end==0 && isfinite(value);
+  float low=0;
+  float high=100000;
+  if(topicIndex==2) low=-100000;
+  if(topicIndex==3) high=200;
+  if(topicIndex==4) {
+    low=-1000;
+    high=1000;
+  }
+  if(topicIndex==5) high=100;
+
+  valid=valid && value>=low && value<=high;
+  *metric(topicIndex)={value,millis(),valid};
+
+  if(valid) {
+    mqttAccepted++;
+    mqttLastAcceptedAt=millis();
+  } else {
+    mqttRejected++;
+    mqttInvalid++;
+  }
 }
+
+// Richiesta e conferma SUBSCRIBE: il successo della connessione MQTT non
+// certifica che il broker abbia accettato le sottoscrizioni.
+void subscribeMqttTopics() {
+  for(int i=0;i<10;i++) {
+    mqttSubscriptions[i]=MqttSubscription{};
+  }
+
+  int requested=0;
+  int immediatelyFailed=0;
+  for(int i=0;i<10;i++) {
+    const String* topic=nullptr;
+    if(i<9) {
+      topic=&cfg.topics[i];
+    } else {
+      topic=&cfg.discovery;
+    }
+    if(topic->length()==0) continue;
+
+    const uint16_t packetId=mqtt.subscribe(topic->c_str(),0);
+    mqttSubscriptions[i].packetId=packetId;
+    if(packetId==0) {
+      mqttSubscriptions[i].status=3;
+      immediatelyFailed++;
+    } else {
+      mqttSubscriptions[i].status=1;
+    }
+    requested++;
+  }
+
+  logEvent("MQTT: richieste SUBSCRIBE="+String(requested)+
+           ", fallimenti immediati="+String(immediatelyFailed));
+}
+
+void mqttSubscriptionAcknowledged(uint16_t packetId,uint8_t qos) {
+  for(int i=0;i<10;i++) {
+    if(mqttSubscriptions[i].packetId==packetId && packetId!=0) {
+      if(qos==0x80) {
+        mqttSubscriptions[i].status=3;
+      } else {
+        mqttSubscriptions[i].status=2;
+      }
+      return;
+    }
+  }
+}
+
 bool command(bool on,const String& why,bool diagnostic=false,bool physical=false) {
   if(on && !environment.temperature.fresh(millis(),cfg.energy.staleMs)) { logEvent("ON rifiutato: sensore non valido"); return false; }
   if(!infrared.send(on,diagnostic,physical)) { logEvent(infrared.lastError); return false; }
@@ -317,6 +511,21 @@ void stateRoute() {
   o["lastActionReason"]=lastActionReason; o["lastCommand"]=infrared.lastCommand; o["lastCommandAtMs"]=infrared.lastAt;
   o["irReady"]=infrared.automaticReady(); o["automationEnabled"]=cfg.automationEnabled;
   o["retainedIgnored"]=retainedIgnored; o["mqttRejected"]=mqttRejected;
+  o["mqttReceived"]=mqttReceived; o["mqttMatched"]=mqttMatched;
+  o["mqttAccepted"]=mqttAccepted; o["mqttUnmatched"]=mqttUnmatched;
+  o["mqttFragmented"]=mqttFragmented; o["mqttOversized"]=mqttOversized;
+  o["mqttInvalid"]=mqttInvalid; o["mqttLastReceivedAgeMs"]=mqttLastReceivedAt?elapsed(now,mqttLastReceivedAt):0;
+  o["mqttLastAcceptedAgeMs"]=mqttLastAcceptedAt?elapsed(now,mqttLastAcceptedAt):0;
+  int mqttSubscriptionsRequested=0,mqttSubscriptionsOk=0,mqttSubscriptionsFailed=0;
+  for(int i=0;i<10;i++) {
+    if(mqttSubscriptions[i].status==0) continue;
+    mqttSubscriptionsRequested++;
+    if(mqttSubscriptions[i].status==2) mqttSubscriptionsOk++;
+    if(mqttSubscriptions[i].status==3) mqttSubscriptionsFailed++;
+  }
+  o["mqttSubscriptionsRequested"]=mqttSubscriptionsRequested;
+  o["mqttSubscriptionsOk"]=mqttSubscriptionsOk;
+  o["mqttSubscriptionsFailed"]=mqttSubscriptionsFailed;
   o["lastRequestedMode"]=lastRequestedMode; o["setpoint"]=cfg.setpoint; o["rebootNeeded"]=rebootNeeded;
   JsonObject m=o.createNestedObject("energy");
   for(int i=0;i<8;i++) {
@@ -787,11 +996,20 @@ void setup() {
   mqtt.setServer(cfg.mqttHost.c_str(),cfg.mqttPort); mqtt.setKeepAlive(cfg.mqttKeepalive);
   if(cfg.mqttUser.length()) mqtt.setCredentials(cfg.mqttUser.c_str(),cfg.mqttPassword.c_str());
   mqtt.onConnect([](bool) {
-    clearTelemetry(); logEvent("MQTT connesso: attesa dati live");
-    for(auto& topic:cfg.topics) if(topic.length()) mqtt.subscribe(topic.c_str(),0);
-    if(cfg.discovery.length()) mqtt.subscribe(cfg.discovery.c_str(),0);
+    clearTelemetry();
+    mqttValueTopic=-1;
+    mqttValueBytes=0;
+    logEvent("MQTT connesso: richiesta topic energetici");
+    subscribeMqttTopics();
   });
-  mqtt.onDisconnect([](AsyncMqttClientDisconnectReason) { clearTelemetry(); logEvent("MQTT disconnesso"); });
+  mqtt.onSubscribe(mqttSubscriptionAcknowledged);
+  mqtt.onDisconnect([](AsyncMqttClientDisconnectReason) {
+    clearTelemetry();
+    mqttValueTopic=-1;
+    mqttValueBytes=0;
+    for(int i=0;i<10;i++) mqttSubscriptions[i]=MqttSubscription{};
+    logEvent("MQTT disconnesso");
+  });
   mqtt.onMessage(receiveMqtt);
   setupRoutes();
   logEvent(String("Firmware ")+VERSION+" pronto; stato fisico sconosciuto");
