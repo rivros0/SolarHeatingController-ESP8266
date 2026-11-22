@@ -2,7 +2,7 @@
 
 Controller locale per usare il surplus fotovoltaico nel riscaldamento di un climatizzatore Hisense, mantenendo priorità ai carichi domestici e alla ricarica batterie. Firmware Arduino per **NodeMCU ESP8266 e Wemos D1 Mini da 4 MB**, dashboard HTML/CSS/JS su LittleFS, SolarAssistant via MQTT, SHT31 e IRremoteESP8266. Nessun servizio cloud necessario.
 
-**Versione 0.3.5 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
+**Versione 0.3.6 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
 
 ## Funzioni
 
@@ -89,6 +89,41 @@ e l'assenza di un topic dalla lista NON ne dimostra la mancata ricezione.
 
 Non lanciare un nuovo `uploadfs` per correggere una misura mancante:
 cancellerebbe configurazione, credenziali e catture IR.
+
+## Correzione ricezione MQTT, duplicati e diagnosi SUBACK (v0.3.6)
+
+Sul dispositivo reale la connessione al broker risultava **MQTT: SI**,
+ma le sei misure rimanevano invalide, con 82 messaggi rifiutati,
+75 retained ignorati e risposta HTTP /api/state di circa 17 secondi.
+Questo e' un indizio, **non** una conferma della causa esatta.
+
+La 0.3.6 introduce:
+- Ricomposizione sicura dei PUBLISH MQTT frammentati fino a 127 byte:
+  la 0.3.5 scartava in blocco i messaggi frammentati, anche validi.
+- Una sola sottoscrizione per ogni topic energetico necessario;
+  il **profilo SolarAssistant** disattiva il filtro diagnostico generale
+  `solar_assistant/#`, per non ricevere decine di topic estranei o duplicati.
+  Il filtro resta **opzionale** e riattivabile manualmente.
+- Verifica dell'esito di ogni richiesta di sottoscrizione via SUBACK
+  della libreria AsyncMqttClient (confermata, in attesa o rifiutata).
+- Conteggi distinti per messaggi ricevuti, riconosciuti, accettati,
+  non associati, frammentati, troppo grandi e non validi.
+- Nella scheda Diagnostica: tabella SUBACK, validita' per metrica,
+  età del campione e statistiche dettagliate.
+- Lo script `scripts/diagnose_mqtt.py` mostra anche questi dati.
+
+La logica di sicurezza resta invariata: i retained non autorizzano
+decisioni energetiche e l'automazione rimane disabilitata fino al
+collaudo dei valori reali.
+
+**Applicazione su dispositivi esistenti:** la sola installazione del
+firmware NON sovrascrive `/config.json`. Dopo aggiornamento firmware
+e dashboard da `/update`, premere **Configurazione → Applica profilo
+MQTT SolarAssistant**, confermare OFF nel popup e usare **Riavvia
+e applica**. Questa operazione conserva credenziali e catture IR,
+ma ripristina espressamente i topic del profilo e disattiva il wildcard.
+Non usare `uploadfs` per installare l'aggiornamento se si desidera
+preservare LittleFS.
 
 ## Profilo MQTT SolarAssistant dell'impianto domestico (v0.3.5)
 
