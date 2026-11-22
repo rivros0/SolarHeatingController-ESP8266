@@ -20,6 +20,43 @@ Tutti gli endpoint, inclusi gli asset, richiedono HTTP Basic. Le mutazioni POST 
 
 Risposte: 400 richiesta/config non valida; 401 autenticazione; 403 token; 409 stato/procedura incompatibile; 413 corpo eccessivo; 503 configurazione/memoria non disponibile; 507 scrittura configurazione fallita.
 
+## Storico 24 ore su LittleFS (v0.3.7)
+
+`GET /api/history` mantiene il vecchio formato JSON array di campioni
+`{s, pv, load, battery, t, h, on, known}`, con le stesse unita' e
+i campi null per misure assenti. Da 0.3.7 il campo `s` e' pero'
+**timestamp Unix UTC in secondi** (non piu' uptime). La dashboard
+riconosce automaticamente i timestamp >= 1.000.000.000 per conservare
+la retrocompatibilita' del codice di visualizzazione durante il rollout.
+
+Il dispositivo conserva i campioni in un archivio a rotazione su
+LittleFS: 26 file `/hist_XX.bin`, ciascuno con header magic/ora UTC
+e record da 22 byte (minuto UTC, tre W in `int32`, temperatura e
+umidita' in decimi `int16`, bit validita' IR/sensori, checksum).
+Lo storico al minuto occupa circa **31 KiB** in 24 ore.
+
+La richiesta HTTP legge soltanto i file pertinenti all'intervallo
+`[UTC minuto corrente - 1439, UTC minuto corrente]`, valida
+intestazioni, checksum e intervallo, ed emette JSON streaming a blocchi
+di circa 1 KiB: non alloca l'intero array in RAM.
+
+`/api/state` aggiunge: `historyClockSynchronized`,
+`historyWrittenSinceBoot`, `historyWriteErrors`,
+`historyWindowHours=24`. L'orologio e' considerato valido
+dopo sincronizzazione SNTP e data plausibile. Prima della
+sincronizzazione `GET /api/history` risponde `[]`.
+
+Il campionamento minimo e' un punto ogni 60 secondi.
+Il campo precedente `historyMs` continua a essere accettato e
+configurabile, ma i valori sotto 60000 ms vengono limitati
+all'intervallo minimo per conservare il filesystem e garantire
+un massimo di 1440 campioni/giorno. I valori maggiori sono rispettati.
+
+I dati LittleFS sono persistenti ai riavvii e a OTA selettivo, ma
+**non** a `uploadfs` o a formattazioni manuali della memoria.
+Lo storico non autorizza l'automazione: MQTT, SHT31, IR e protezioni
+continuano a usare le misure live.
+
 ## Diagnostica della ricezione MQTT (v0.3.6)
 
 Il vecchio valore `mqtt: true` in `GET /api/state` conferma solo la
