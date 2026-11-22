@@ -412,7 +412,7 @@ void receiveMqtt(char* topic,char* payload,AsyncMqttClientMessageProperties prop
 
   char* end=nullptr;
   const float value=strtof(mqttValueBuffer,&end);
-  while(end && (*end==' '||*end=='\\r'||*end=='\\n'||*end=='\\t')) {
+  while(end && (*end==' '||*end=='\r'||*end=='\n'||*end=='\t')) {
     end++;
   }
 
@@ -493,7 +493,7 @@ bool command(bool on,const String& why,bool diagnostic=false,bool physical=false
 }
 void stateRoute() {
   if(!authenticated()) return;
-  DynamicJsonDocument doc(4096); JsonObject o=doc.to<JsonObject>(); uint32_t now=millis();
+  DynamicJsonDocument doc(5120); JsonObject o=doc.to<JsonObject>(); uint32_t now=millis();
   o["version"]=VERSION; o["firmwareBoard"]=githubFirmwareBoard(); o["csrf"]=csrf; o["uptime"]=now/1000;
   o["wifi"]=WiFi.status()==WL_CONNECTED; o["mqtt"]=mqtt.connected();
   o["localIp"]=WiFi.localIP().toString(); o["staticIpEnabled"]=cfg.staticIp.length()>0;
@@ -713,7 +713,54 @@ void setupRoutes() {
       doc["retained"]=s.retained; doc["ageMs"]=elapsed(millis(),s.at);
       String row; serializeJson(doc,row); if(!first) web.sendContent(","); first=false; web.sendContent(row); yield();
     }
-    web.sendContent("]}"); web.sendContent("");
+    // ======================================================================
+    // ESITO SOTTOSCRIZIONI - OGNI TOPIC HA IL PROPRIO SUBACK
+    //
+    // La lista e' sempre completa anche quando non e' arrivato nessun dato.
+    // Per questo non va confusa con il buffer degli ultimi 12 topic osservati.
+    // ======================================================================
+    web.sendContent("],\\\"subscriptions\\\":[");
+    bool firstSubscription=true;
+    const uint32_t now=millis();
+    for(int i=0;i<10;i++) {
+      const String* name=nullptr;
+      const char* metricName=nullptr;
+      if(i<9) {
+        name=&cfg.topics[i];
+        metricName=metricNames[i];
+      } else {
+        name=&cfg.discovery;
+        metricName="discovery";
+      }
+      if(name->length()==0) continue;
+      StaticJsonDocument<384> doc;
+      doc["metric"]=metricName;
+      doc["topic"]=*name;
+      doc["packetId"]=mqttSubscriptions[i].packetId;
+      switch(mqttSubscriptions[i].status) {
+        case 1: doc["status"]="in_attesa"; break;
+        case 2: doc["status"]="confermata"; break;
+        case 3: doc["status"]="rifiutata"; break;
+        default: doc["status"]="non_richiesta"; break;
+      }
+      if(i<8) {
+        const Sample* measurement=metric(i);
+        doc["valid"]=measurement->fresh(now,cfg.energy.staleMs);
+        if(measurement->valid) {
+          doc["ageMs"]=elapsed(now,measurement->at);
+        } else {
+          doc["ageMs"]=nullptr;
+        }
+      }
+      String row;
+      serializeJson(doc,row);
+      if(!firstSubscription) web.sendContent(",");
+      firstSubscription=false;
+      web.sendContent(row);
+      yield();
+    }
+    web.sendContent("]}");
+    web.sendContent("");
   });
   web.on("/api/history",HTTP_GET,[] {
     if(!authenticated()) return;
