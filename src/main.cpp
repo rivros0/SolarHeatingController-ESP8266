@@ -719,7 +719,7 @@ void setupRoutes() {
     // La lista e' sempre completa anche quando non e' arrivato nessun dato.
     // Per questo non va confusa con il buffer degli ultimi 12 topic osservati.
     // ======================================================================
-    web.sendContent("],\\\"subscriptions\\\":[");
+    web.sendContent("],\"subscriptions\":[");
     bool firstSubscription=true;
     const uint32_t now=millis();
     for(int i=0;i<10;i++) {
