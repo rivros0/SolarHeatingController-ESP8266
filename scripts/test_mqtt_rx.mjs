@@ -14,7 +14,8 @@ const app = readFileSync("data/app.js", "utf8");
 const index = readFileSync("data/index.html", "utf8");
 const diagnose = readFileSync("scripts/diagnose_mqtt.py", "utf8");
 
-assert.ok(main.includes('static const char* VERSION="0.3.6"'));
+assert.match(main, /static const char\* VERSION="0\.3\.[0-9]+"/,
+  "I test MQTT devono restare validi dopo i normali aggiornamenti firmware.");
 
 for(const expected of [
   "mqtt.onSubscribe(mqttSubscriptionAcknowledged)",

@@ -8,7 +8,7 @@ Tutti gli endpoint, inclusi gli asset, richiedono HTTP Basic. Le mutazioni POST 
 | GET | `/api/state` | Misure, validità/età, stato, versione, heap, token CSRF |
 | GET / POST | `/api/config` | Configurazione redatta / modifica versionata |
 | POST | `/api/mode` | `{"mode":"auto"}`; alternative `force_on`, `force_off`, `diagnostic` |
-| GET | `/api/history` | Fino a 120 campioni RAM, JSON inviato in streaming |
+| GET | `/api/history` | Fino a 1.440 campioni in 24 ore, UTC e LittleFS, JSON streaming |
 | GET | `/api/diagnostics` | Fino a 16 eventi e 12 topic osservati |
 | GET / POST | `/api/ir` | Cattura corrente e slot / prove e salvataggio |
 | POST | `/api/learn` | Apprendimento: `baseline`, `on`, `off`, `save`, `cancel` |
@@ -19,6 +19,43 @@ Tutti gli endpoint, inclusi gli asset, richiedono HTTP Basic. Le mutazioni POST 
 | GET / POST | `/api/github-update` | Controlla e aggiorna separatamente firmware e asset web statici verificati SHA256, dopo conferma OFF |
 
 Risposte: 400 richiesta/config non valida; 401 autenticazione; 403 token; 409 stato/procedura incompatibile; 413 corpo eccessivo; 503 configurazione/memoria non disponibile; 507 scrittura configurazione fallita.
+
+## Storico 24 ore su LittleFS (v0.3.7)
+
+`GET /api/history` mantiene il vecchio formato JSON array di campioni
+`{s, pv, load, battery, t, h, on, known}`, con le stesse unita' e
+i campi null per misure assenti. Da 0.3.7 il campo `s` e' pero'
+**timestamp Unix UTC in secondi** (non piu' uptime). La dashboard
+riconosce automaticamente i timestamp >= 1.000.000.000 per conservare
+la retrocompatibilita' del codice di visualizzazione durante il rollout.
+
+Il dispositivo conserva i campioni in un archivio a rotazione su
+LittleFS: 26 file `/hist_XX.bin`, ciascuno con header magic/ora UTC
+e record da 22 byte (minuto UTC, tre W in `int32`, temperatura e
+umidita' in decimi `int16`, bit validita' IR/sensori, checksum).
+Lo storico al minuto occupa circa **31 KiB** in 24 ore.
+
+La richiesta HTTP legge soltanto i file pertinenti all'intervallo
+`[UTC minuto corrente - 1439, UTC minuto corrente]`, valida
+intestazioni, checksum e intervallo, ed emette JSON streaming a blocchi
+di circa 1 KiB: non alloca l'intero array in RAM.
+
+`/api/state` aggiunge: `historyClockSynchronized`,
+`historyWrittenSinceBoot`, `historyWriteErrors`,
+`historyWindowHours=24`. L'orologio e' considerato valido
+dopo sincronizzazione SNTP e data plausibile. Prima della
+sincronizzazione `GET /api/history` risponde `[]`.
+
+Il campionamento minimo e' un punto ogni 60 secondi.
+Il campo precedente `historyMs` continua a essere accettato e
+configurabile, ma i valori sotto 60000 ms vengono limitati
+all'intervallo minimo per conservare il filesystem e garantire
+un massimo di 1440 campioni/giorno. I valori maggiori sono rispettati.
+
+I dati LittleFS sono persistenti ai riavvii e a OTA selettivo, ma
+**non** a `uploadfs` o a formattazioni manuali della memoria.
+Lo storico non autorizza l'automazione: MQTT, SHT31, IR e protezioni
+continuano a usare le misure live.
 
 ## Diagnostica della ricezione MQTT (v0.3.6)
 
@@ -195,7 +232,7 @@ Campi principali:
 | `humidityAssist` in `energy` | false | consenso esplicito all'assistenza UR in HEAT |
 | `humidityOn` in `energy` | 60 % | richiesta UR elevata: 3 punti sopra humidityOff, max 85 |
 | `humidityOff` in `energy` | 55 % | rientro: 30–70 % |
-| `historyMs` | 30000 ms | 10000–3600000 ms |
+| `historyMs` | 60000 ms | 10000–3600000 ms; valori <60000 limitati a 1 minuto |
 | `forceOnMs` | 3600000 ms | 60000–86400000 ms |
 
 **UR e storico:** `GET /api/state` include `humidityAssist`,

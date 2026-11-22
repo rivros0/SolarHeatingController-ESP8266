@@ -5,6 +5,12 @@ let csrf="",config={},state={},diagnostics={},pollCount=0;
 let historyCache = [];
 // Ancora browser/ESP: la scheda non dispone di timestamp assoluti storici.
 let historyTimeAnchor = null;
+let historyLastFetchAt = 0;
+let historyFetchInProgress = false;
+
+// Gli 1.440 campioni sono conservati su LittleFS dall'ESP, non nel browser.
+// Qui cambiamo soltanto la finestra di visualizzazione, senza nuove API.
+const HISTORY_VIEW_HOURS = [1, 6, 12, 24];
 const TAB_IDS = ["overview", "charts", "settings", "infrared", "diagnostics"];
 const $=id=>document.getElementById(id);
 const number=(v,d=0)=>v===null||v===undefined||!Number.isFinite(v)?"—":v.toLocaleString("it-IT",{maximumFractionDigits:d});
@@ -27,28 +33,84 @@ function tabIdFromHash() {
   return "overview";
 }
 
+// Restituisce una finestra reale di N ore, anche se il controller e'
+ // stato acceso da pochi minuti: gli estremi vuoti preservano l'asse.
+function historyVisibleRows(rows, selectedHours, nowSeconds) {
+  if(!HISTORY_VIEW_HOURS.includes(selectedHours)) {
+    selectedHours = 24;
+  }
+  const start = nowSeconds - selectedHours * 3600;
+
+  // Compatibilita' con la vecchia API che usava i secondi dal boot:
+  // se il firmware e' precedente non proiettiamo su date immaginarie.
+  if(rows.length>0 && rows[0].s<1000000000) {
+    return rows;
+  }
+
+  const visible = [{s:start, pv:null, load:null, battery:null,
+                    t:null, h:null, on:false, known:false}];
+  for(const row of rows) {
+    // Il bordo sinistro rappresenta il limite temporale; il primo
+    // campione ammissibile e' nel minuto successivo (N * 60 punti).
+    if(Number.isFinite(row.s) && row.s>start && row.s<=nowSeconds) {
+      visible.push(row);
+    }
+  }
+  visible.push({s:nowSeconds, pv:null, load:null, battery:null,
+                t:null, h:null, on:false, known:false});
+  return visible;
+}
+
 function renderHistoryCharts() {
   const chartsPanel = $("tab-charts");
   if(chartsPanel.hidden) {
-    // Un canvas in display:none non ha dimensioni: disegnare adesso lo
-    // azzererebbe. Disegniamo soltanto quando la scheda e' visibile.
     return;
   }
+
+  const selected = Number($("historyRange").value);
+  const rows = historyVisibleRows(
+    historyCache, selected, Math.floor(Date.now()/1000)
+  );
+
   draw(
     "energyChart",
-    historyCache,
+    rows,
     [["pv", "#b58919"], ["load", "#345c82"], ["battery", "#26866d"]],
     "W"
   );
-  drawEnvironmentChart(historyCache);
+  drawEnvironmentChart(rows);
 }
 
 async function updateHistoryForActiveTab() {
+  if(historyFetchInProgress) {
+    return;
+  }
+
+  historyFetchInProgress = true;
+  // Memorizza anche i tentativi falliti: evita di saturare il webserver
+  // con richieste a ripetizione ogni 3 secondi se LittleFS e' occupato.
+  historyLastFetchAt = Date.now();
   try {
-    historyCache = await api("/api/history");
+    const rows = await api("/api/history");
+    if(!Array.isArray(rows)) {
+      throw new Error("Formato storico non valido.");
+    }
+    historyCache = rows;
+    $("historyStorageStatus").textContent =
+      rows.length + " campioni disponibili · massimo 1.440 su 24 ore. " +
+      "I dati sono conservati su LittleFS.";
+    if(state.historyClockSynchronized===false) {
+      $("historyStorageStatus").textContent =
+        "In attesa della sincronizzazione NTP: lo storico persistente " +
+        "richiede un orario UTC valido.";
+    }
     renderHistoryCharts();
   } catch(error) {
+    $("historyStorageStatus").textContent =
+      "Storico non disponibile: " + error.message;
     notice("Storico non disponibile: " + error.message);
+  } finally {
+    historyFetchInProgress = false;
   }
 }
 
@@ -186,9 +248,12 @@ dl("system",[["Indirizzo IP",state.localIp||"—"],["Assegnazione IP",state.stat
 const l=state.learning;$("learnState").textContent=`Fase: ${l.stage} · Spento ${number(l.offW)} W · Acceso ${number(l.onW)} W · Dopo OFF ${number(l.offAfterW)} W · Avvio ${number(l.startupMs/1000)} s · Rumore ${number(l.noiseW)} W`;
 $("version").textContent="Firmware "+state.version;
 if(state.rebootNeeded)notice("Configurazione salvata. Premi «Riavvia e applica»: comparirà il popup per confermare lo spegnimento.");
-if(pollCount++%5===0) {
-  historyCache = await api("/api/history");
-  renderHistoryCharts();
+// Lo storico completo puo' contenere 1.440 punti: non scaricarlo ogni
+// 15 secondi, soprattutto mentre l'utente usa altre schede.
+pollCount++;
+if(tabIdFromHash()==="charts" &&
+   Date.now()-historyLastFetchAt>=60000) {
+  await updateHistoryForActiveTab();
 }
 }catch(e){notice("Connessione o dati non disponibili: "+e.message);}finally{setTimeout(refresh,3000);}}
 // ============================================================================
@@ -200,7 +265,17 @@ if(pollCount++%5===0) {
 // dall'orologio del dispositivo che visualizza la pagina.
 // ============================================================================
 function axisTimestampMs(sampleSeconds) {
-  if(!historyTimeAnchor || !Number.isFinite(sampleSeconds)) {
+  if(!Number.isFinite(sampleSeconds)) {
+    return null;
+  }
+
+  // Firmware >= 0.3.7: i campioni hanno timestamp Unix UTC reale,
+  // percio' restano datati correttamente anche dopo un riavvio.
+  if(sampleSeconds>=1000000000) {
+    return sampleSeconds*1000;
+  }
+
+  if(!historyTimeAnchor) {
     return null;
   }
 
@@ -378,10 +453,18 @@ function draw(id, rows, series, unit) {
     context.beginPath();
 
     let connected = false;
+    let previousSecond = null;
     for(const row of rows) {
+      // Dopo uno spegnimento o un'interruzione MQTT, non interpolare
+      // linee fittizie attraverso minuti senza misurazioni.
       if(!Number.isFinite(row[key])) {
         connected = false;
+        previousSecond = null;
         continue;
+      }
+
+      if(previousSecond!==null && row.s-previousSecond>125) {
+        connected = false;
       }
 
       if(!connected) {
@@ -389,7 +472,9 @@ function draw(id, rows, series, unit) {
       } else {
         context.lineTo(xAt(row), yAt(row[key]));
       }
+
       connected = true;
+      previousSecond = row.s;
     }
     context.stroke();
   }
@@ -553,6 +638,12 @@ function drawEnvironmentChart(rows) {
       endX = (xAt(row) + xAt(rows[index + 1])) / 2;
     }
 
+    // Ogni misura rappresenta al massimo il proprio minuto:
+    // i periodi senza dati non devono essere dipinti come ON/OFF certi.
+    const oneMinutePixels = plotWidth * 60 / timeRange;
+    startX = Math.max(startX, xAt(row) - oneMinutePixels / 2);
+    endX = Math.min(endX, xAt(row) + oneMinutePixels / 2);
+
     if(!row.known) {
       context.fillStyle = "#c4c9cf";
     } else if(row.on) {
@@ -570,11 +661,17 @@ function drawEnvironmentChart(rows) {
     context.strokeStyle = color;
     context.lineWidth = 2;
     let active = false;
+    let previousSecond = null;
 
     for(const row of rows) {
       if(!Number.isFinite(row[key])) {
         active = false;
+        previousSecond = null;
         continue;
+      }
+
+      if(previousSecond!==null && row.s-previousSecond>125) {
+        active = false;
       }
 
       const x = xAt(row);
@@ -584,7 +681,9 @@ function drawEnvironmentChart(rows) {
       } else {
         context.moveTo(x, y);
       }
+
       active = true;
+      previousSecond = row.s;
     }
 
     context.stroke();
@@ -644,7 +743,7 @@ const groups=[
   ["sampleMs","Campionamento (ms)","number"],
   ["filterAlpha","Filtro EMA (0,01–1)","number"]
 ]],
-["Tempi e storico",[["energy.stableMs","Stabilità avvio (ms)","number"],["energy.dropMs","Verifica calo (ms)","number"],["energy.restartMs","Minimo tra riavvii (ms)","number"],["energy.minRunMs","Funzionamento minimo (ms)","number"],["energy.staleMs","Scadenza dati (ms)","number"],["historyMs","Intervallo storico RAM (ms)","number"],["forceOnMs","Durata Forza ON (ms)","number"]]],
+["Tempi e storico",[["energy.stableMs","Stabilità avvio (ms)","number"],["energy.dropMs","Verifica calo (ms)","number"],["energy.restartMs","Minimo tra riavvii (ms)","number"],["energy.minRunMs","Funzionamento minimo (ms)","number"],["energy.staleMs","Scadenza dati (ms)","number"],["historyMs","Intervallo storico (ms, minimo 60000)","number"],["forceOnMs","Durata Forza ON (ms)","number"]]],
 ["Infrarossi",[["protocol","Protocollo",["RAW","KELON","WHIRLPOOL_AC"]],["powerKind","Semantica alimentazione",["unverified","discrete","toggle"]],["irVerified","Ho verificato ON/OFF distinti, HEAT e setpoint sul modello reale","checkbox"],["receiver","Ricevitore GPIO12 abilitato","checkbox"],["model","Modello IR (id libreria)","number"],["fan","Ventola",["auto","low","medium","high"]]]],
 ["Riconoscimento assorbimento",[["detector.baselineMs","Finestra riferimento (ms)","number"],["detector.startupMs","Attesa compressore (ms)","number"],["detector.observationMs","Finestra verifica (ms)","number"],["detector.deltaW","Variazione minima (W)","number"],["detector.maxNoiseW","Rumore massimo (W)","number"]]]];
 function get(obj,path){return path.split(".").reduce((v,k)=>v?.[k],obj);}
@@ -1112,6 +1211,11 @@ async function diagnosticsRefresh() {
     subscriptions.length + " · Rifiutate: " + failed +
     ". Una connessione MQTT attiva non garantisce dati validi.";
 }
+// Cambia intervallo senza nuova richiesta al dispositivo: i dati 24h
+// vengono caricati una volta e filtrati localmente.
+$("historyRange").onchange = function() {
+  renderHistoryCharts();
+};
 $("refreshDiagnostics").onclick=()=>act(diagnosticsRefresh);$("exportLogs").onclick=()=>act(async()=>download("solar-log.json",await api("/api/diagnostics")));
 initializeTabs();
 
