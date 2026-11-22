@@ -1,24 +1,24 @@
 {
-  "version": "0.3.5",
+  "version": "0.3.6",
   "layout": "4m1m",
   "boards": {
     "nodemcuv2": {
-      "size": 573360,
-      "sha256": "fbbb2fbfbdaf6b2c21acb58793cef0cd7f5eb5b3c97377a8a53fdd2893ff8a52"
+      "size": 575760,
+      "sha256": "77fede8e1aaaa634c225fab84843dfc5e9dc14b914287571b95cfc248ecba1cf"
     },
     "d1_mini": {
-      "size": 573360,
-      "sha256": "0fca3cf045f5c047670d78af9d2d33aa71c372e215c14b3917e33f862a377a17"
+      "size": 575760,
+      "sha256": "f2547eb615b70b5f4dac1b314ae6fdfc315d8170495a5da3808332ee2e0b3567"
     }
   },
   "web": {
     "index.html": {
-      "size": 11152,
-      "sha256": "388c94dfb4bceb303540ec6f24fd94de1d46e3575a0f76040f0e0479fca643a9"
+      "size": 11679,
+      "sha256": "68de53f151994285b7219511eb648426db64d0674a01783046d2853018056747"
     },
     "app.js": {
-      "size": 38792,
-      "sha256": "0b250acf720b0272bc6e494d65b094749d0811eb03cf889eb2b98e5411d01676"
+      "size": 41342,
+      "sha256": "85ea38c15a57995f3aa345d24fd22f2c0727fb5bb17295858e815350ecf22b35"
     },
     "style.css": {
       "size": 6947,
