@@ -14,7 +14,7 @@ Controller locale per usare il surplus fotovoltaico nel riscaldamento di un clim
 - Temperatura/umidità SHT31 con filtro EMA, segnalazione errori e tentativi di recupero.
 - **Assistenza UR in HEAT opzionale** (disabilitata di default): richiesta quando UR >=60%, rientro <=55%, soltanto se T < tempOff-0,5 °C e restano rispettate le protezioni energetiche/IR e i tempi. HEAT non rimuove acqua dall'aria; per vera deumidificazione occorre una modalita' DRY verificata separatamente.
 - Stato comandato separato da stima, confidenza e stato sconosciuto; apprendimento guidato e riconoscimento variazioni di carico con riferimento e attesa compressore.
-- Dashboard responsive **a cinque schede**, grafici senza dipendenze esterne, diagnostica, esportazione configurazione senza credenziali, 120 campioni e 16 eventi in RAM.
+- Dashboard responsive **a cinque schede**, grafici senza dipendenze esterne, diagnostica, esportazione configurazione senza credenziali, storico persistente 24h (1.440 campioni al minuto) e 16 eventi in RAM.
 - OTA firmware `.bin` autenticato su `/update`, controllo errori, riavvio differito e conservazione LittleFS.
 - Aggiornamento da GitHub (release firmware-stable) di **firmware e interfaccia web** con controllo versione, board, HTTPS verificato e SHA256. La dashboard e' verificata per singolo file: si puo' aggiornare senza cambiare versione firmware e senza cancellare credenziali, configurazione o codici IR.
 - Credenziali iniziali Wi-Fi/admin in file locale escluso da Git e configurazione IPv4 statico (gateway, subnet, DNS).
@@ -469,8 +469,8 @@ controlli IR specifici non implementati in questa versione.
 Il grafico **Temperatura, umidita' e stato climatizzatore** separa
 gli assi °C e % UR e visualizza una fascia ON/OFF/ignoto del comando
 climatizzatore. Non e' una misura fisica indipendente. Lo storico tiene
-120 campioni in RAM (circa 60 minuti a 30 secondi) e si azzera al
-riavvio. I campioni senza lettura producono intervalli vuoti.
+fino a 1.440 campioni al minuto su LittleFS, coprendo le ultime 24 ore
+anche dopo il riavvio. I campioni senza lettura producono intervalli vuoti.
 
 **Aggiornamento dalla v0.2.1:** il nuovo grafico e i nuovi controlli web
 richiedono anche il caricamento del nuovo LittleFS. Prima di `uploadfs`
