@@ -176,7 +176,13 @@ if(!config.energy || !config.energy.humidityAssist) {
     number(config.energy.humidityOff)+"%.";
 }
 dl("climate",[["Stato comandato",state.commanded],["Stato stimato",state.estimated],["Affidabilità indizio",number(state.confidence*100)+" %"],["Variazione potenza",number(state.estimatedClimateW)+" W"],["Ultimo comando",state.lastCommand],["Motivo ultimo comando",state.lastActionReason],["Ora comando",state.lastCommand==="none"?"—":`${number(state.lastCommandAtMs/1000)} s dall’avvio`],["Codici discreti verificati",state.irReady?"Sì":"No"]]);
-dl("system",[["Indirizzo IP",state.localIp||"—"],["Assegnazione IP",state.staticIpEnabled?"Statico":"DHCP"],["Uptime",number(state.uptime)+" s"],["Heap libero",number(state.heap)+" byte"],["Spazio OTA",number(state.otaSpace)+" byte"],["Retained ignorati",state.retainedIgnored],["Messaggi rifiutati",state.mqttRejected],["Reset",state.resetReason],["Inverter",state.inverter||"—"]]);
+dl("system",[["Indirizzo IP",state.localIp||"—"],["Assegnazione IP",state.staticIpEnabled?"Statico":"DHCP"],["Uptime",number(state.uptime)+" s"],["Heap libero",number(state.heap)+" byte"],["Spazio OTA",number(state.otaSpace)+" byte"],["Retained ignorati",state.retainedIgnored],
+["Messaggi ricevuti",state.mqttReceived],["Messaggi riconosciuti",state.mqttMatched],
+["Misure accettate",state.mqttAccepted],["Messaggi fuori topic",state.mqttUnmatched],
+["PUBLISH frammentati",state.mqttFragmented],["Messaggi troppo grandi",state.mqttOversized],
+["Payload non validi",state.mqttInvalid],["Messaggi rifiutati",state.mqttRejected],
+["SUBACK confermati",number(state.mqttSubscriptionsOk)+"/"+number(state.mqttSubscriptionsRequested)],
+["SUBSCRIBE fallite",state.mqttSubscriptionsFailed],["Reset",state.resetReason],["Inverter",state.inverter||"—"]]);
 const l=state.learning;$("learnState").textContent=`Fase: ${l.stage} · Spento ${number(l.offW)} W · Acceso ${number(l.onW)} W · Dopo OFF ${number(l.offAfterW)} W · Avvio ${number(l.startupMs/1000)} s · Rumore ${number(l.noiseW)} W`;
 $("version").textContent="Firmware "+state.version;
 if(state.rebootNeeded)notice("Configurazione salvata. Premi «Riavvia e applica»: comparirà il popup per confermare lo spegnimento.");
@@ -1024,7 +1030,88 @@ document.querySelectorAll("[data-learn]").forEach(function(button) {
     });
   };
 });
-async function diagnosticsRefresh(){diagnostics=await api("/api/diagnostics");$("topics").replaceChildren();for(const row of diagnostics.topics){const tr=document.createElement("tr");for(const value of[row.topic,row.value,number(row.ageMs/1000)+" s",row.retained?"Sì · ignorato":"No"]){const td=document.createElement("td");td.textContent=value;tr.append(td);}$("topics").append(tr);}$("events").textContent=diagnostics.events.map(e=>`${(e.atMs/1000).toFixed(0)}s  ${e.message}`).join("\n");}
+// ============================================================================
+// DIAGNOSTICA SUBACK E CAMPIONI MQTT
+//
+// La presenza del solo collegamento MQTT non dimostra la sottoscrizione:
+// ogni riga mostra il risultato specifico del broker per il topic.
+// ============================================================================
+async function diagnosticsRefresh() {
+  diagnostics = await api("/api/diagnostics");
+
+  $("topics").replaceChildren();
+  for(const row of diagnostics.topics) {
+    const tableRow = document.createElement("tr");
+    const values = [
+      row.topic,
+      row.value,
+      number(row.ageMs / 1000) + " s",
+      row.retained ? "Sì · ignorato" : "No"
+    ];
+    for(const value of values) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      tableRow.append(cell);
+    }
+    $("topics").append(tableRow);
+  }
+
+  $("events").textContent = diagnostics.events.map(function(event) {
+    return (event.atMs / 1000).toFixed(0) + "s  " + event.message;
+  }).join("\n");
+
+  const subscriptions = diagnostics.subscriptions;
+  $("mqttSubscriptions").replaceChildren();
+
+  if(!Array.isArray(subscriptions)) {
+    $("mqttSummary").textContent =
+      "Il firmware non espone ancora lo stato SUBACK. " +
+      "Aggiornare alla versione 0.3.6.";
+    return;
+  }
+
+  let confirmed = 0;
+  let failed = 0;
+  for(const subscription of subscriptions) {
+    const tableRow = document.createElement("tr");
+    if(subscription.status === "confermata") {
+      confirmed++;
+    }
+    if(subscription.status === "rifiutata") {
+      failed++;
+    }
+
+    let age = "—";
+    if(Number.isFinite(subscription.ageMs)) {
+      age = number(subscription.ageMs / 1000, 1) + " s";
+    }
+    let metricValid = "—";
+    if(subscription.valid === true) {
+      metricValid = "Sì";
+    } else if(subscription.valid === false) {
+      metricValid = "No";
+    }
+
+    const values = [
+      subscription.metric,
+      subscription.status,
+      metricValid,
+      age,
+      subscription.topic
+    ];
+    for(const value of values) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      tableRow.append(cell);
+    }
+    $("mqttSubscriptions").append(tableRow);
+  }
+
+  $("mqttSummary").textContent =
+    "Sottoscrizioni confermate: " + confirmed + "/" +
+    subscriptions.length + " · Rifiutate: " + failed +
+    ". Una connessione MQTT attiva non garantisce dati validi.";
+}
 $("refreshDiagnostics").onclick=()=>act(diagnosticsRefresh);$("exportLogs").onclick=()=>act(async()=>download("solar-log.json",await api("/api/diagnostics")));
 initializeTabs();
 
