@@ -12,8 +12,9 @@
 #include "generated_update_page.h"
 #include <time.h>
 #include "environment_manager.h"
+#include "history_store.h"
 using namespace solar;
-static const char* VERSION="0.3.6";
+static const char* VERSION="0.3.7";
 ESP8266WebServer web(80);
 AsyncMqttClient mqtt;
 Adafruit_SHT31 sht;
@@ -64,8 +65,9 @@ struct Event { uint32_t at=0; String message; } events[16];
 uint8_t eventHead=0,eventCount=0;
 struct TopicSeen { String topic,value; uint32_t at=0; bool retained=false; } seen[12];
 uint8_t seenHead=0;
-struct History { uint32_t at; float pv,load,battery,t,h; uint8_t flags; } history[120];
-uint8_t historyHead=0,historyCount=0;
+// Lo storico a 24 ore e' ospitato su LittleFS, non nella RAM.
+// Il precedente ring buffer 120xfloat e' stato sostituito da record di 22
+// byte conservati per minuto in file orari circolari.
 struct Learning {
   String stage="idle"; uint32_t at=0,startup=0; float sum=0,squares=0;
   uint32_t count=0; float offMean=0,onMean=0,offAfter=0,noise=0;
@@ -511,6 +513,10 @@ void stateRoute() {
   o["lastActionReason"]=lastActionReason; o["lastCommand"]=infrared.lastCommand; o["lastCommandAtMs"]=infrared.lastAt;
   o["irReady"]=infrared.automaticReady(); o["automationEnabled"]=cfg.automationEnabled;
   o["retainedIgnored"]=retainedIgnored; o["mqttRejected"]=mqttRejected;
+  o["historyClockSynchronized"]=historyClockSynchronized(static_cast<uint32_t>(time(nullptr)));
+  o["historyWrittenSinceBoot"]=historyStoreWrittenCount();
+  o["historyWriteErrors"]=historyStoreErrorCount();
+  o["historyWindowHours"]=24;
   o["mqttReceived"]=mqttReceived; o["mqttMatched"]=mqttMatched;
   o["mqttAccepted"]=mqttAccepted; o["mqttUnmatched"]=mqttUnmatched;
   o["mqttFragmented"]=mqttFragmented; o["mqttOversized"]=mqttOversized;
@@ -762,19 +768,11 @@ void setupRoutes() {
     web.sendContent("]}");
     web.sendContent("");
   });
+  // 24 ore UTC in streaming, senza allocare 1.440 campioni in RAM.
+  // I timestamp sono Unix UTC, ma la dashboard li visualizza in ora locale.
   web.on("/api/history",HTTP_GET,[] {
     if(!authenticated()) return;
-    web.setContentLength(CONTENT_LENGTH_UNKNOWN); web.sendHeader("Cache-Control","no-store"); web.send(200,"application/json",""); web.sendContent("[");
-    for(int i=0;i<historyCount;i++) {
-      auto& h=history[(historyHead+120-historyCount+i)%120]; StaticJsonDocument<256> doc;
-      doc["s"]=h.at;
-      if(h.flags&1) { doc["pv"]=h.pv; doc["load"]=h.load; doc["battery"]=h.battery; }
-      else { doc["pv"]=nullptr; doc["load"]=nullptr; doc["battery"]=nullptr; }
-      if(h.flags&2) { doc["t"]=h.t; doc["h"]=h.h; } else { doc["t"]=nullptr; doc["h"]=nullptr; }
-      doc["on"]=bool(h.flags&4); doc["known"]=bool(h.flags&8);
-      String row; serializeJson(doc,row); if(i) web.sendContent(","); web.sendContent(row); yield();
-    }
-    web.sendContent("]"); web.sendContent("");
+    historyStoreSendJson(web,static_cast<uint32_t>(time(nullptr)));
   });
   web.on("/api/reboot",HTTP_POST,[] {
     if(!mutation()) return;
@@ -1123,13 +1121,51 @@ void loop() {
     else if(d.action==Action::On && ready && (mode!=Mode::Auto||cfg.automationEnabled)) command(true,d.reason);
     if(expired) { mode=Mode::ForceOff; logEvent("Forza ON scaduto: Forza OFF"); }
   }
-  if(elapsed(now,lastHistory)>=cfg.historyMs) {
+  // ========================================================================
+  // STORICO PERSISTENTE 24H - MINIMO 60 SECONDI TRA I CAMPIONI
+  //
+  // Il vecchio historyMs=30000 di una configurazione gia' salvata viene
+  // rispettato come valore legacy, ma limitato a un campione per minuto.
+  // Senza NTP non scriviamo record con orari inventati.
+  // ========================================================================
+  const uint32_t historyInterval=(cfg.historyMs<60000UL)?60000UL:cfg.historyMs;
+  if(elapsed(now,lastHistory)>=historyInterval) {
     lastHistory=now;
-    bool e=mqtt.connected()&&energy.pv.fresh(now,cfg.energy.staleMs)&&energy.load.fresh(now,cfg.energy.staleMs)&&energy.battery.fresh(now,cfg.energy.staleMs);
-    bool t=environment.temperature.fresh(now,cfg.energy.staleMs);
-    history[historyHead]={now/1000,energy.pv.value,energy.load.value,energy.battery.value*(cfg.energy.negativeCharge?-1:1),environment.temperature.value,environment.humidity.value,
-      uint8_t((e?1:0)|(t?2:0)|(infrared.on?4:0)|(infrared.known?8:0))};
-    historyHead=(historyHead+1)%120; if(historyCount<120) historyCount++;
+    const uint32_t epoch=static_cast<uint32_t>(time(nullptr));
+    if(historyClockSynchronized(epoch)) {
+      const bool validEnergy=mqtt.connected() &&
+        energy.pv.fresh(now,cfg.energy.staleMs) &&
+        energy.load.fresh(now,cfg.energy.staleMs) &&
+        energy.battery.fresh(now,cfg.energy.staleMs);
+      const bool validEnvironment=
+        environment.temperature.fresh(now,cfg.energy.staleMs) &&
+        environment.humidity.fresh(now,cfg.energy.staleMs);
+
+      HistoryMinuteSample sample{};
+      sample.minuteUtc=epoch/60UL;
+      if(validEnergy) {
+        sample.flags|=HISTORY_ENERGY_VALID;
+        sample.pvW=static_cast<int32_t>(lroundf(energy.pv.value));
+        sample.loadW=static_cast<int32_t>(lroundf(energy.load.value));
+        float batteryW=energy.battery.value;
+        if(cfg.energy.negativeCharge) batteryW=-batteryW;
+        sample.batteryW=static_cast<int32_t>(lroundf(batteryW));
+      }
+      if(validEnvironment) {
+        sample.flags|=HISTORY_ENV_VALID;
+        sample.tempTenths=static_cast<int16_t>(
+          lroundf(environment.temperature.value*10.0f));
+        sample.humidityTenths=static_cast<int16_t>(
+          lroundf(environment.humidity.value*10.0f));
+      }
+      if(infrared.known) sample.flags|=HISTORY_IR_KNOWN;
+      if(infrared.on && infrared.known) sample.flags|=HISTORY_IR_ON;
+
+      if(!historyStoreAppend(sample)) {
+        // Non interrompere sensore, MQTT, IR o automazione se LittleFS
+        // non puo' conservare uno storico; lo stato e' visibile via API.
+      }
+    }
   }
   yield();
 }
