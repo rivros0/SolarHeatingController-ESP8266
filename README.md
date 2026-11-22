@@ -2,7 +2,7 @@
 
 Controller locale per usare il surplus fotovoltaico nel riscaldamento di un climatizzatore Hisense, mantenendo priorità ai carichi domestici e alla ricarica batterie. Firmware Arduino per **NodeMCU ESP8266 e Wemos D1 Mini da 4 MB**, dashboard HTML/CSS/JS su LittleFS, SolarAssistant via MQTT, SHT31 e IRremoteESP8266. Nessun servizio cloud necessario.
 
-**Versione 0.3.6 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
+**Versione 0.3.7 — da collaudare sull'impianto reale.** Compilazione e test software non certificano compatibilità IR, correttezza dei topic o protezione delle batterie. Il climatizzatore e' un Hisense CA50XS1AG con telecomando DG11L1-12; protocollo IR da acquisire. La tensione nominale del banco AGM deve essere verificata: occorre configurarli e verificare il comportamento prima di abilitare l'automazione. Il controller non sostituisce le protezioni dell'inverter.
 
 ## Funzioni
 
@@ -134,6 +134,46 @@ e l'assenza di un topic dalla lista NON ne dimostra la mancata ricezione.
 
 Non lanciare un nuovo `uploadfs` per correggere una misura mancante:
 cancellerebbe configurazione, credenziali e catture IR.
+
+## Grafici con storico persistente 24 ore (v0.3.7)
+
+Il controller conserva **fino a 1.440 campioni**, uno al minuto per
+24 ore, utilizzando circa **31 KiB di LittleFS** anziche' una grande
+allocazione RAM. I 26 piccoli file orari in rotazione si chiamano
+`/hist_00.bin` ... `/hist_25.bin` e sono indipendenti dalla
+configurazione, dalle credenziali e dai codici IR. Non vengono rimossi
+all'aggiornamento OTA selettivo.
+
+Lo storico e' **persistente attraverso i riavvii**. Ogni record contiene
+timestamp UTC (sincronizzato via NTP), produzione FV, carico, potenza
+batteria, temperatura, umidita' e stato IR comandato/dichiarato.
+Un valore MQTT o ambientale assente viene riportato come `null`:
+i grafici mostrano un vero intervallo vuoto, senza inventare valori.
+La linea e' interrotta quando mancano almeno due minuti di dati.
+Se NTP non e' ancora disponibile, non si salvano campioni con un
+orario inventato: il sistema continua a funzionare e registra
+quando riceve finalmente l'ora valida.
+
+La scheda **Grafici** dispone di finestre **1, 6, 12 e 24 ore**
+(default 24h). Gli orari sono mostrati nel fuso locale del browser.
+La dashboard scarica lo storico solo aprendo Grafici e al massimo
+una volta al minuto, riducendo il carico HTTP della NodeMCU.
+
+Il campo di configurazione `historyMs` ora ha predefinito `60000`.
+Le vecchie configurazioni salvate con `30000` restano valide:
+il firmware applica comunque **minimo 60.000 ms**, senza modificarle.
+Valori volontariamente superiori a un minuto continuano a essere
+rispettati e riducono la densita' dei campioni.
+
+L'archivio viene creato gradualmente: subito dopo l'aggiornamento
+non potranno esistere 24 ore di dati retroattivi. Dopo 24 ore di
+alimentazione, con NTP disponibile, sara' popolato completamente.
+Una interruzione di alimentazione produce lacune, non linee simulate.
+
+**Aggiornamento:** dal firmware 0.3.6 passare alla 0.3.7 tramite
+`/update` e includere i tre file web selettivi. Non eseguire
+`uploadfs`, che sovrascriverebbe anche lo storico e la configurazione.
+Il solo `pio run -t upload` aggiorna il firmware ma NON la dashboard.
 
 ## Correzione ricezione MQTT, duplicati e diagnosi SUBACK (v0.3.6)
 
