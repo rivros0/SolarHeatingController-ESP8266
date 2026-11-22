@@ -54,6 +54,20 @@ git pull --ff-only origin main
 python3 scripts/diagnose_mqtt.py --host 192.168.1.242
 ```
 
+Per un **HTTP 401** o un **timeout** durante la diagnosi, effettuare prima
+il controllo rapido della sola API di stato:
+
+```bash
+python3 scripts/diagnose_mqtt.py --host 192.168.1.242 --quick --timeout 25
+```
+
+Ogni richiesta mostra l'endpoint, i byte ricevuti e il tempo di risposta:
+il terminale identifica la rotta che va in timeout. Un HTTP 401
+significa credenziali web respinte, non password MQTT errata.
+Il browser puo' mantenere in cache credenziali diverse da quelle
+digitate nel terminale. Verificare il nome utente web configurato;
+non e' necessariamente `admin`.
+
 Lo script chiede soltanto le credenziali **dell'interfaccia web**
 (non quelle MQTT) e consulta `/api/config`, `/api/state` e
 `/api/diagnostics` su due istanti distanti 12 secondi.
