@@ -8,7 +8,7 @@ Tutti gli endpoint, inclusi gli asset, richiedono HTTP Basic. Le mutazioni POST 
 | GET | `/api/state` | Misure, validità/età, stato, versione, heap, token CSRF |
 | GET / POST | `/api/config` | Configurazione redatta / modifica versionata |
 | POST | `/api/mode` | `{"mode":"auto"}`; alternative `force_on`, `force_off`, `diagnostic` |
-| GET | `/api/history` | Fino a 120 campioni RAM, JSON inviato in streaming |
+| GET | `/api/history` | Fino a 1.440 campioni in 24 ore, UTC e LittleFS, JSON streaming |
 | GET | `/api/diagnostics` | Fino a 16 eventi e 12 topic osservati |
 | GET / POST | `/api/ir` | Cattura corrente e slot / prove e salvataggio |
 | POST | `/api/learn` | Apprendimento: `baseline`, `on`, `off`, `save`, `cancel` |
@@ -232,7 +232,7 @@ Campi principali:
 | `humidityAssist` in `energy` | false | consenso esplicito all'assistenza UR in HEAT |
 | `humidityOn` in `energy` | 60 % | richiesta UR elevata: 3 punti sopra humidityOff, max 85 |
 | `humidityOff` in `energy` | 55 % | rientro: 30–70 % |
-| `historyMs` | 30000 ms | 10000–3600000 ms |
+| `historyMs` | 60000 ms | 10000–3600000 ms; valori <60000 limitati a 1 minuto |
 | `forceOnMs` | 3600000 ms | 60000–86400000 ms |
 
 **UR e storico:** `GET /api/state` include `humidityAssist`,
