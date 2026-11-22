@@ -21,7 +21,10 @@ bool storageReady=false,configReady=false;
 static void setKnownSolarAssistantDefaults(Config& target) {
   target.mqttHost = "192.168.1.240";
   target.mqttPort = 1883;
-  target.discovery = "solar_assistant/#";
+  // I sette topic del profilo sono gia' noti: evita il wildcard che
+  // raddoppia i messaggi e porta dati estranei alla NodeMCU.
+  // Il filtro diagnostico generale resta attivabile manualmente.
+  target.discovery = "";
 
   target.topics[0] = "solar_assistant/inverter_1/pv_power/state";
   target.topics[1] = "solar_assistant/inverter_1/load_power/state";
