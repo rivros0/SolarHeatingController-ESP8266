@@ -14,6 +14,8 @@ jobs:
         run: node scripts/test_web_ui.mjs
       - name: Test etichette temporali grafici
         run: node scripts/test_chart_time.mjs
+      - name: Test storico 24 ore persistente e 1440 campioni
+        run: node scripts/test_history_24h.mjs
       - name: Test conferma stato fisico OFF da ogni scheda
         run: node scripts/test_off_confirmation.mjs
       - name: Test profilo MQTT SolarAssistant e preservazione credenziali
