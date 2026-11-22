@@ -98,8 +98,13 @@ assert.equal(
 
 const html = readFileSync("data/index.html", "utf8");
 assert.ok(
-  html.includes("orario locale ricostruito"),
-  "La dashboard deve indicare che gli orari sono ricostruiti."
+  html.includes("timestamp UTC sincronizzati tramite NTP"),
+  "La dashboard deve descrivere l'orario UTC persistente."
+);
+assert.equal(
+  axis.axisTimestampMs(1795035600),
+  1795035600000,
+  "I timestamp Unix UTC devono essere interpretati senza riferimenti al boot."
 );
 
 console.log("Asse temporale: conversione, etichette desktop/mobile e fallback OK.");
